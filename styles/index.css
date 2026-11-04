@@ -1,0 +1,19 @@
+@import "./tokens.css";
+@import "./base.css";
+@import "./components.css";
+@import "./panel.css";
+@import "./controls.css";
+@import "./nav.css";
+@import "./sheet.css";
+
+/* Narrow screens (phones, portrait MCU1 S/X) — panel becomes a bottom sheet */
+@media (max-width: 760px) {
+  :root { --panel-w: calc(100vw - var(--edge) * 2); --edge: .625rem; }
+  .panel { top: auto; bottom: var(--edge); max-height: 62%; }
+  .panel.compact { max-height: calc(var(--tap) + var(--pad) * 2 + 2px); }
+  .controls { bottom: auto; }
+  .controls .zoom-group { display: none; }
+  .maneuver { width: calc(100vw - var(--edge) * 2); }
+  .trip, .arrival { width: calc(100vw - var(--edge) * 2); }
+  .mv-dist { font-size: 2.5rem; }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "teslaplay",
+  "version": "0.1.0",
+  "description": "Premium web navigation for Tesla's in-car browser, powered by Yandex Maps JS API v3.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/build.mjs --serve",
+    "build": "node scripts/build.mjs",
+    "build:demo": "node scripts/build.mjs --single",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "typescript": "^5.8.0"
+  }
+}

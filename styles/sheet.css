@@ -1,0 +1,50 @@
+/* ─────────────── Modal sheet (settings, onboarding) ─────────────── */
+.backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .36); z-index: 50; animation: fade var(--t-med) var(--ease) both; }
+.backdrop.out { animation: fade-out var(--t-med) var(--ease) both; }
+@keyframes fade { from { opacity: 0; } }
+@keyframes fade-out { to { opacity: 0; } }
+
+.sheet {
+  position: absolute; z-index: 51;
+  top: var(--edge); bottom: var(--edge); left: 50%;
+  width: min(40rem, calc(100% - var(--edge) * 2));
+  transform: translateX(-50%);
+  border-radius: var(--r-xl);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-2);
+  border: 1px solid var(--hairline);
+  animation: sheet-in var(--t-slow) var(--ease) both;
+}
+.sheet.out { animation: sheet-out var(--t-med) var(--ease-in) both; }
+@keyframes sheet-in { from { opacity: 0; transform: translate(-50%, 2rem) scale(.98); } }
+@keyframes sheet-out { to { opacity: 0; transform: translate(-50%, 1.5rem) scale(.98); } }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; padding: var(--pad) var(--pad) .5rem 1.5rem; }
+.sheet-title { font-family: var(--font-display); font-size: 1.75rem; font-weight: 800; letter-spacing: -.03em; }
+.sheet-body { flex: 1; overflow-y: auto; padding: .25rem 1.5rem 1.5rem; overscroll-behavior: contain; scrollbar-width: none; }
+.sheet-body::-webkit-scrollbar { display: none; }
+
+.set-section { margin-top: 1.375rem; }
+.set-caption { font-size: .8125rem; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .03em; margin: 0 1rem .5rem; }
+.set-group { border-radius: var(--r-md); background: var(--fill-3); padding: 0 1rem; }
+.set-row { display: flex; align-items: center; gap: .875rem; min-height: 3.5rem; padding: .5rem 0; position: relative; }
+.set-row + .set-row::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: var(--hairline); }
+.set-row .label { flex: 1; min-width: 0; font-weight: 500; font-size: 1.0625rem; }
+.set-row .label small { display: block; font-size: .8125rem; color: var(--text-2); font-weight: 500; margin-top: .125rem; }
+.set-row .segmented { min-width: 15rem; }
+.set-row select, .set-row .input { height: 2.5rem; border-radius: .625rem; border: 0; background: var(--fill-2); padding: 0 .75rem; font-weight: 600; font-size: .9375rem; min-width: 10rem; }
+.set-row .input { width: 15rem; user-select: text; }
+.set-foot { margin: .5rem 1rem 0; font-size: .8125rem; color: var(--text-2); line-height: 1.45; }
+.set-foot a { color: var(--accent); }
+
+/* Onboarding */
+.onboard { position: absolute; inset: 0; z-index: 60; display: grid; place-items: center; background: radial-gradient(1200px 700px at 30% 20%, rgba(10, 132, 255, .18), transparent 60%), #0b0d12; color: #f5f5f7; }
+.onboard-card { width: min(34rem, calc(100% - 2rem)); padding: 2.25rem; border-radius: var(--r-xl); background: rgba(28, 28, 32, .8); border: 1px solid rgba(255, 255, 255, .08); box-shadow: var(--shadow-2); animation: sheet-in-plain var(--t-slow) var(--ease) both; }
+@keyframes sheet-in-plain { from { opacity: 0; transform: translateY(1.5rem) scale(.98); } }
+.onboard-icon { width: 4.5rem; height: 4.5rem; border-radius: 1.125rem; overflow: hidden; margin-bottom: 1.25rem; box-shadow: 0 12px 30px rgba(10, 132, 255, .4); }
+.onboard h1 { font-family: var(--font-display); font-size: 2.25rem; letter-spacing: -.035em; margin: 0; font-weight: 800; }
+.onboard p { color: rgba(235, 235, 245, .66); font-size: 1.0625rem; line-height: 1.5; margin: .625rem 0 1.5rem; }
+.onboard .field { background: rgba(120, 120, 128, .2); }
+.onboard .btn { margin-top: .75rem; }
+.onboard .link { display: block; margin: 1rem auto 0; color: #0a84ff; font-weight: 600; }
+.onboard .err { color: #ff453a; font-weight: 600; margin-top: .75rem; font-size: .9375rem; }

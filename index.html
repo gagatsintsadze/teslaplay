@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#0b0d12">
+  <meta name="color-scheme" content="dark light">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Teslaplay Navigation</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://api-maps.yandex.ru">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Georgian:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/app.css">
+  <script src="config.js"></script>
+</head>
+<body>
+  <div id="app" aria-live="polite">
+    <div id="map" class="map"></div>
+    <div id="hud" class="hud"></div>
+    <div class="boot" id="boot">
+      <div class="boot-mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64" width="64" height="64"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3a8bff"/><stop offset="1" stop-color="#0050d8"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#bg)"/><path d="M32 13 47 49 32 41 17 49Z" fill="#fff"/></svg>
+      </div>
+    </div>
+  </div>
+  <!-- dev-reload -->
+  <script src="assets/app.js" defer></script>
+</body>
+</html>

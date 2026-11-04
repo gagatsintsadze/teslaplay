@@ -1,0 +1,70 @@
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  font-size: calc(16px * var(--ui-scale));
+  height: 100%;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--map-bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 1rem;
+  line-height: 1.35;
+  letter-spacing: -.011em;
+  font-feature-settings: "cv11", "ss01", "ss03";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  overscroll-behavior: none;
+}
+
+#app { position: fixed; inset: 0; overflow: hidden; }
+
+button, input, select { font: inherit; color: inherit; letter-spacing: inherit; }
+button {
+  border: 0; margin: 0; padding: 0; background: none; cursor: pointer;
+  touch-action: manipulation;
+  -webkit-appearance: none; appearance: none;
+}
+input { user-select: text; -webkit-user-select: text; }
+svg { display: block; flex: none; }
+:focus { outline: none; }
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 2px; }
+
+.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum", "cv11"; }
+.muted { color: var(--text-2); }
+.faint { color: var(--text-3); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ── Map ── */
+.map { position: absolute; inset: 0; background: var(--map-bg); z-index: 0; isolation: isolate; }
+.map > * { touch-action: none; }
+
+/* ── HUD layer: transparent to the map except where UI lives ── */
+.hud { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+.hud > * { pointer-events: auto; }
+.hud .passthrough { pointer-events: none; }
+
+/* ── Boot splash ── */
+.boot {
+  position: absolute; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  background: #0b0d12;
+  transition: opacity var(--t-slow) var(--ease), visibility 0s linear var(--t-slow);
+}
+.boot.done { opacity: 0; visibility: hidden; }
+.boot-mark { animation: boot-pulse 1.6s var(--ease) infinite; filter: drop-shadow(0 12px 30px rgba(10, 132, 255, .45)); }
+.boot-mark svg { border-radius: 16px; }
+@keyframes boot-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(.94); opacity: .8; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+}

@@ -1,0 +1,61 @@
+import { params } from './core/env';
+import { storage } from './core/storage';
+
+export interface AppConfig {
+  yandexApiKey: string;
+  yandexSuggestKey: string;
+  yandexSearchKey: string;
+  yandexRouterKey: string;
+  mapLang: string;
+  openChargeMapKey: string;
+  demo: boolean;
+  demoBackdropUrl: string;
+  /** Start a simulated drive automatically when navigation begins. */
+  autoSimulate: boolean;
+  debug: boolean;
+}
+
+declare global {
+  interface Window { TESLAPLAY_CONFIG?: Partial<AppConfig> }
+}
+
+const DEFAULTS: AppConfig = {
+  yandexApiKey: '',
+  yandexSuggestKey: '',
+  yandexSearchKey: '',
+  yandexRouterKey: '',
+  mapLang: 'en_US',
+  openChargeMapKey: '',
+  demo: false,
+  demoBackdropUrl: 'demo/backdrop-dark.jpg',
+  autoSimulate: false,
+  debug: false,
+};
+
+/** Keys a user typed into the app (onboarding / settings) override the deployed config. */
+export type LocalKeys = Partial<Pick<AppConfig, 'yandexApiKey' | 'yandexSuggestKey' | 'yandexSearchKey' | 'yandexRouterKey' | 'openChargeMapKey' | 'mapLang'>>;
+
+export function loadConfig(): AppConfig {
+  const fromFile = window.TESLAPLAY_CONFIG || {};
+  const local = storage.get<LocalKeys>('keys', {});
+  const cfg: AppConfig = { ...DEFAULTS, ...stripEmpty(fromFile), ...stripEmpty(local) };
+  if (params.has('demo')) cfg.demo = params.get('demo') !== '0';
+  if (params.get('key')) cfg.yandexApiKey = params.get('key')!;
+  if (params.get('lang')) cfg.mapLang = params.get('lang')!;
+  if (params.has('sim')) cfg.autoSimulate = params.get('sim') !== '0';
+  if (params.has('debug')) cfg.debug = true;
+  return cfg;
+}
+
+export function saveLocalKeys(keys: LocalKeys) {
+  storage.set('keys', { ...storage.get<LocalKeys>('keys', {}), ...keys });
+}
+
+function stripEmpty<T extends object>(o: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const k in o) {
+    const v = o[k];
+    if (v !== '' && v !== undefined && v !== null) out[k] = v;
+  }
+  return out;
+}
