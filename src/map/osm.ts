@@ -105,7 +105,13 @@ export class OsmEngine implements MapEngine {
     const style = map.getStyle();
     if (!style) return;
     const layers: any[] = style.layers || [];
-    const firstSymbol = (layers.find((l) => l.type === 'symbol') || {}).id;
+    // Insert our layers above *every* road/area layer and below the labels. (Basemaps can have
+    // a label early on — CARTO puts a waterway label before all the roads — and inserting before
+    // that let roads paint over the 3D buildings, making them look see-through.)
+    let lastGround = -1;
+    layers.forEach((l, i) => { if (l.type !== 'symbol' && !String(l.id).startsWith('tp-')) lastGround = i; });
+    const firstSymbol = layers.slice(lastGround + 1).filter((l) => !String(l.id).startsWith('tp-'))[0];
+    const above = firstSymbol ? firstSymbol.id : undefined;
     const dark = this.theme === 'dark';
     // Real 3D buildings: heights from OpenStreetMap (height / building:levels) via OpenFreeMap.
     // The basemap's own flat building footprints are hidden so the extrusions read cleanly.
@@ -124,8 +130,8 @@ export class OsmEngine implements MapEngine {
           filter: ['!=', ['get', 'hide_3d'], true],
           paint: {
             'fill-extrusion-color': dark
-              ? ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#2a303c', 40, '#343c4c', 120, '#3e4860']
-              : ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#e9e6e0', 40, '#e1ddd5', 120, '#d6d2ca'],
+              ? ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#2c3038', 40, '#363b46', 120, '#424a5a']
+              : ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#ebe3d6', 40, '#e2d9cb', 120, '#d6ccbc'],
             'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 13.5, 0, 15, ['coalesce', ['get', 'render_height'], 8]],
             'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'], 13.5, 0, 15, ['coalesce', ['get', 'render_min_height'], 0]],
             // Must be fully opaque: any value below 1 composites the whole building layer
@@ -133,15 +139,15 @@ export class OsmEngine implements MapEngine {
             'fill-extrusion-opacity': 1,
             'fill-extrusion-vertical-gradient': true,
           },
-        }, firstSymbol);
+        }, above);
       }
-      map.setLight({ anchor: 'viewport', color: '#ffffff', intensity: dark ? 0.35 : 0.42, position: [1.3, 200, 35] });
+      map.setLight({ anchor: 'viewport', color: '#ffffff', intensity: dark ? 0.4 : 0.5, position: [1.15, 210, 30] });
     } catch (e) { console.warn('[osm map] 3D buildings unavailable', e); }
     if (!map.getSource('tp-routes')) {
       map.addSource('tp-routes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       // Routes sit on the road *under* the 3D buildings, so buildings stay solid and hide the
       // line only where it really passes behind them.
-      const below = map.getLayer('tp-buildings') ? 'tp-buildings' : firstSymbol;
+      const below = map.getLayer('tp-buildings') ? 'tp-buildings' : above;
       for (const l of ROUTE_LAYERS) {
         map.addLayer({
           id: l.id,
