@@ -44,7 +44,7 @@ On the Yandex map, **Settings → Appearance → Road style** switches between *
 Yandex only activates a v3 key once its **HTTP Referer restriction** field is filled in. In the Developer Dashboard, open the key's settings and add every host you'll use, for example:
 
 ```
-teslaplay.pages.dev
+gagatsintsadze.github.io
 localhost
 ```
 
