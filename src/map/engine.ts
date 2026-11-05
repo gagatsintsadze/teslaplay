@@ -34,6 +34,8 @@ export interface ViewRequest extends Partial<ViewState> { duration?: number }
 export interface MapEngine {
   readonly kind: 'yandex' | 'osm' | 'demo';
   readonly supportsTraffic: boolean;
+  /** Steepest camera pitch the engine renders well, degrees (the driving view uses it). */
+  readonly maxTilt: number;
   init(container: HTMLElement, opts: { center: LngLat; zoom: number; theme: 'light' | 'dark' }): Promise<void>;
   setTheme(theme: 'light' | 'dark'): void;
   /** Resolves to whether traffic could be shown. */

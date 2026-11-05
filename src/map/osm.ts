@@ -17,6 +17,8 @@ const STYLES = {
   light: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
 };
 const VENDOR = 'vendor/maplibre/maplibre-gl';
+/** OpenFreeMap: OpenMapTiles-schema vector tiles with building heights (render_height), free, no key. */
+const BUILDINGS_TILES = 'https://tiles.openfreemap.org/planet';
 const LOAD_TIMEOUT = 15000;
 
 let loading: Promise<any> | null = null;
@@ -52,6 +54,7 @@ const ROUTE_LAYERS: { id: string; role: string; part: 'casing' | 'fill' }[] = [
 export class OsmEngine implements MapEngine {
   readonly kind = 'osm' as const;
   readonly supportsTraffic = false;
+  readonly maxTilt = 62;
   private gl: any;
   private map: any;
   private theme: 'light' | 'dark' = 'dark';
@@ -103,24 +106,35 @@ export class OsmEngine implements MapEngine {
     if (!style) return;
     const layers: any[] = style.layers || [];
     const firstSymbol = (layers.find((l) => l.type === 'symbol') || {}).id;
-    const buildingLayer = layers.find((l) => l['source-layer'] === 'building');
-    if (buildingLayer && !map.getLayer('tp-buildings')) {
-      try {
+    const dark = this.theme === 'dark';
+    // Real 3D buildings: heights from OpenStreetMap (height / building:levels) via OpenFreeMap.
+    // The basemap's own flat building footprints are hidden so the extrusions read cleanly.
+    layers.filter((l) => l['source-layer'] === 'building' && l.id !== 'tp-buildings').forEach((l) => {
+      try { map.setLayoutProperty(l.id, 'visibility', 'none'); } catch { /* ignore */ }
+    });
+    try {
+      if (!map.getSource('tp-ofm')) map.addSource('tp-ofm', { type: 'vector', url: BUILDINGS_TILES });
+      if (!map.getLayer('tp-buildings')) {
         map.addLayer({
           id: 'tp-buildings',
           type: 'fill-extrusion',
-          source: buildingLayer.source,
+          source: 'tp-ofm',
           'source-layer': 'building',
-          minzoom: 14.5,
+          minzoom: 13.5,
+          filter: ['!=', ['get', 'hide_3d'], true],
           paint: {
-            'fill-extrusion-color': this.theme === 'dark' ? '#272c36' : '#dde1e8',
-            'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
-            'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-            'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 14.5, 0, 15.5, 0.85],
+            'fill-extrusion-color': dark
+              ? ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#2a303c', 40, '#343c4c', 120, '#3e4860']
+              : ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#e9e6e0', 40, '#e1ddd5', 120, '#d6d2ca'],
+            'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 13.5, 0, 15, ['coalesce', ['get', 'render_height'], 8]],
+            'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'], 13.5, 0, 15, ['coalesce', ['get', 'render_min_height'], 0]],
+            'fill-extrusion-opacity': dark ? 0.92 : 0.96,
+            'fill-extrusion-vertical-gradient': true,
           },
         }, firstSymbol);
-      } catch (e) { console.warn('[osm map] 3D buildings unavailable', e); }
-    }
+      }
+      map.setLight({ anchor: 'viewport', color: '#ffffff', intensity: dark ? 0.35 : 0.42, position: [1.3, 200, 35] });
+    } catch (e) { console.warn('[osm map] 3D buildings unavailable', e); }
     if (!map.getSource('tp-routes')) {
       map.addSource('tp-routes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       for (const l of ROUTE_LAYERS) {
@@ -193,7 +207,8 @@ export class OsmEngine implements MapEngine {
     if (theme === this.theme) return;
     this.theme = theme;
     if (!this.map) return;
-    this.map.setStyle(STYLES[theme]); // `style.load` re-adds buildings and routes
+    // Full reload (no diff) so `style.load` fires and our buildings and route layers are re-added.
+    this.map.setStyle(STYLES[theme], { diff: false });
   }
 
   async setTraffic(_visible: boolean): Promise<boolean> { return false; }
@@ -271,7 +286,9 @@ export class OsmEngine implements MapEngine {
       const c = colors[l.role];
       if (!map.getLayer(l.id)) continue;
       map.setPaintProperty(l.id, 'line-color', l.part === 'casing' ? c.casing : c.fill);
-      map.setPaintProperty(l.id, 'line-width', ['interpolate', ['exponential', 1.5], ['zoom'], 8, (l.part === 'casing' ? c.cw : c.fw) * 0.45, 16, l.part === 'casing' ? c.cw : c.fw]);
+      const w = l.part === 'casing' ? c.cw : c.fw;
+      // Wide and confident in the close driving view, slim when zoomed out.
+      map.setPaintProperty(l.id, 'line-width', ['interpolate', ['exponential', 1.5], ['zoom'], 8, w * 0.4, 14, w * 0.8, 17, w * 1.35, 19.5, w * 2.3]);
     }
     src.setData({
       type: 'FeatureCollection',
@@ -309,7 +326,8 @@ export class OsmEngine implements MapEngine {
     if (!this.user || this.userEl !== el) {
       if (this.user) this.user.remove();
       el.style.zIndex = '5000';
-      this.user = new this.gl.Marker({ element: el, anchor: 'center' }).setLngLat(coord).addTo(this.map);
+      // Pitch-aligned: in the tilted driving view the arrow lies flat on the road.
+      this.user = new this.gl.Marker({ element: el, anchor: 'center', pitchAlignment: 'map' }).setLngLat(coord).addTo(this.map);
       this.userEl = el;
     } else {
       this.user.setLngLat(coord);

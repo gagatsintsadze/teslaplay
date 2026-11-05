@@ -110,6 +110,8 @@ export class App {
       onMode: (m) => this.store.set({ follow: m }),
     });
     this.follow.tilt3D = this.state.settings.view3D;
+    // 3D on: open tilted so buildings stand up (the engine caps it; the demo map stays flat).
+    if (this.follow.exploreTilt) this.engine.setView({ tilt: this.follow.exploreTilt, zoom: Math.max(16.2, this.engine.getView().zoom), duration: 1200 });
     this.engine.onUserGesture(() => { if (this.follow.mode !== 'none') this.follow.setMode('none'); });
     this.engine.onViewChange((v) => { if (Math.abs(v.azimuth - this.state.azimuth) > 0.5) this.store.set({ azimuth: v.azimuth }); });
     this.engine.onClick((e) => this.onMapTap(e));
@@ -216,7 +218,7 @@ export class App {
     if ('traffic' in patch) this.setTraffic(!!patch.traffic);
     if ('view3D' in patch) {
       this.follow.tilt3D = !!patch.view3D;
-      if (!this.state.navigating) this.engine.setView({ tilt: patch.view3D ? 45 : 0, duration: 500 });
+      if (!this.state.navigating) this.engine.setView({ tilt: this.follow.exploreTilt, duration: 500 });
     }
     if ('avoidTolls' in patch && this.state.panel === 'planner') this.computeRoutes();
     if (['vehicleId', 'usableKWh', 'consumption', 'reserveSoc', 'maxChargeSoc'].some((k) => k in patch) && this.state.panel === 'planner') this.schedulePlan();
@@ -590,7 +592,7 @@ export class App {
       query: '', suggestions: [], results: null,
     });
     this.follow.setMode('follow');
-    this.engine.setView({ tilt: 0, azimuth: 0, zoom: 16, duration: 600 });
+    this.engine.setView({ tilt: this.follow.exploreTilt, azimuth: 0, zoom: 16.5, duration: 900 });
     if ((this.cfg.demo || this.state.locStatus !== 'ok') && pos) {
       this.location.push({ coord: pos, accuracy: 5, speed: 0, heading: this.follow.displayHeading, time: Date.now(), simulated: true });
     }

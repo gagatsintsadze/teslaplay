@@ -27,6 +27,7 @@ export interface DemoBackdrop { url: string; trafficUrl?: string; bounds: LngLat
 export class DemoEngine implements MapEngine {
   readonly kind = 'demo' as const;
   readonly supportsTraffic = true;
+  readonly maxTilt = 0; // flat backdrop image
   private root!: HTMLElement;
   private img!: HTMLImageElement;
   private svgEl!: SVGSVGElement;

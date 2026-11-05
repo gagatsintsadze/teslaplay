@@ -55,6 +55,7 @@ interface RouteStyle { casing: string; fill: string; casingW: number; fillW: num
 export class YandexEngine implements MapEngine {
   readonly kind = 'yandex' as const;
   supportsTraffic = true;
+  readonly maxTilt = 50; // ymaps3 camera limit
   private y: any;
   private map: any;
   private scheme: any;
@@ -206,7 +207,7 @@ export class YandexEngine implements MapEngine {
     const styles: Record<string, RouteStyle> = {
       alternative: { casing: v('--route-alt-casing', '#3a4250'), fill: v('--route-alt', '#7e8a9c'), casingW: 11, fillW: 7, z: 1000 },
       traveled: { casing: '#4a5160', fill: '#8a93a3', casingW: 11, fillW: 7, z: 1050 },
-      primary: { casing: v('--route-casing', '#0b4fc4'), fill: v('--route', '#2f8bff'), casingW: 14, fillW: 9, z: 1100 },
+      primary: { casing: v('--route-casing', '#0b4fc4'), fill: v('--route', '#2f8bff'), casingW: 17, fillW: 11, z: 1100 },
     };
     for (const line of lines) {
       if (line.coords.length < 2) continue;

@@ -27,6 +27,7 @@ export class FollowController {
   private running = false;
   private lastCam = 0;
   private zoom = 16.5;
+  private tilt = 0;
   private distToManeuver = Infinity;
 
   constructor(private engine: MapEngine, private puck: Puck, private opts: { lite(): boolean; onMode(m: FollowMode): void }) {}
@@ -35,8 +36,16 @@ export class FollowController {
     if (m === this.mode) return;
     this.mode = m;
     this.opts.onMode(m);
-    if (m === 'follow' && !this.navigating) this.engine.setView({ azimuth: 0, tilt: 0, duration: 400 });
-    if (m !== 'none' && this.disp) {
+    this.tilt = this.engine.getView().tilt; // ease from wherever the camera is now
+    if (m === 'follow' && !this.navigating) this.engine.setView({ azimuth: 0, tilt: this.exploreTilt, duration: 400 });
+    if (m === 'course' && this.navigating && this.disp) {
+      // Fly into the close, tilted driving view.
+      const z = this.navZoom();
+      this.zoom = z;
+      this.tilt = this.driveTilt;
+      this.engine.setView({ center: this.disp, zoom: z, tilt: this.tilt, azimuth: this.heading, duration: 1400 });
+      this.lastCam = performance.now() + 1400;
+    } else if (m !== 'none' && this.disp) {
       const z = this.navigating ? this.navZoom() : Math.max(15.5, this.engine.getView().zoom);
       this.zoom = z;
       this.engine.setView({ center: this.disp, zoom: z, duration: 450 });
@@ -91,11 +100,19 @@ export class FollowController {
     requestAnimationFrame((t) => this.tick(t));
   }
 
+  /** Pitch while driving: as steep as the engine allows (Apple-style street-level view). */
+  get driveTilt() { return this.tilt3D ? Math.min(60, this.engine.maxTilt) : 0; }
+  private get tiltTarget() { return this.navigating ? this.driveTilt : this.exploreTilt; }
+
+  /** Pitch while exploring with 3D on. */
+  get exploreTilt() { return this.tilt3D ? Math.min(45, this.engine.maxTilt) : 0; }
+
+  /** Close in town, pulling back smoothly with speed; a touch closer approaching a turn. */
   private navZoom() {
     const kmh = (this.fix && this.fix.speed ? this.fix.speed : 0) * 3.6;
-    let z = 17.4 - Math.max(0, Math.min(1, (kmh - 30) / 80)) * 2.1;
-    if (this.distToManeuver < 260 && kmh < 75) z += 0.45;
-    return z;
+    let z = 18.5 - Math.max(0, Math.min(1, (kmh - 25) / 90)) * 1.8;
+    if (this.distToManeuver < 260 && kmh < 75) z += 0.4;
+    return Math.min(19, z);
   }
 
   private tick(now: number) {
@@ -122,17 +139,21 @@ export class FollowController {
 
     const camInterval = this.opts.lite() ? 66 : 33;
     if (this.mode !== 'none' && this.disp && now - this.lastCam >= camInterval) {
+      const dt = Math.min(250, Math.max(0, now - this.lastCam));
       this.lastCam = now;
+      // The follow controller owns the pitch while following, so per-frame camera jumps
+      // can't cut short a tilt animation.
+      this.tilt += (this.tiltTarget - this.tilt) * (1 - Math.exp(-dt / 380)); // time-based: same feel at any frame rate
       if (this.mode === 'course') {
         this.zoom += ((this.navigating ? this.navZoom() : Math.max(16, this.zoom)) - this.zoom) * 0.06;
-        this.engine.setView({ center: this.disp, zoom: this.zoom, azimuth: this.heading, tilt: this.tilt3D ? 48 : 0 });
+        this.engine.setView({ center: this.disp, zoom: this.zoom, azimuth: this.heading, tilt: this.tilt });
       } else {
-        this.engine.setView({ center: this.disp });
+        this.engine.setView({ center: this.disp, tilt: this.tilt });
       }
     }
 
     const moving = t < 1 || (fix.speed || 0) > 0.5;
-    const settling = Math.abs(angleDiff(this.heading, target)) > 0.5;
+    const settling = Math.abs(angleDiff(this.heading, target)) > 0.5 || (this.mode !== 'none' && Math.abs(this.tilt - this.tiltTarget) > 0.3);
     if (moving || settling || this.mode === 'course') requestAnimationFrame((tt) => this.tick(tt));
     else this.running = false;
   }
