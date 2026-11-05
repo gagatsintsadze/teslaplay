@@ -8,16 +8,41 @@ import type { ReverseResult } from './search';
  * It finds addresses, streets and cities (not businesses).
  */
 export class HttpGeocoder {
-  constructor(private key: string, private lang: string) {}
+  private endpoints: { url: string; key: string }[];
+
+  /**
+   * @param key       Geocoder API key (geocode-maps.yandex.ru/v1) — or the JS API key alone
+   * @param lang      response language
+   * @param legacyKey JS API key for the legacy 1.x endpoint, tried if the Geocoder key is refused
+   */
+  constructor(key: string, private lang: string, legacyKey = '') {
+    this.endpoints = [];
+    if (key && key !== legacyKey) this.endpoints.push({ url: 'https://geocode-maps.yandex.ru/v1/', key });
+    if (legacyKey || key) this.endpoints.push({ url: 'https://geocode-maps.yandex.ru/1.x/', key: legacyKey || key });
+  }
 
   private async query(params: Record<string, string>): Promise<any[]> {
-    const qs = new URLSearchParams({ apikey: this.key, format: 'json', lang: this.lang, ...params });
-    const r = await fetch(`https://geocode-maps.yandex.ru/1.x/?${qs}`);
-    if (!r.ok) throw new Error(`geocoder ${r.status}`);
-    const j = await r.json();
-    const members = j && j.response && j.response.GeoObjectCollection && j.response.GeoObjectCollection.featureMember;
-    return (members || []).map((m: any) => m.GeoObject).filter(Boolean);
+    let last: unknown = null;
+    for (let i = 0; i < this.endpoints.length; i++) {
+      const ep = this.endpoints[i];
+      try {
+        const qs = new URLSearchParams({ apikey: ep.key, format: 'json', lang: this.lang, ...params });
+        const r = await fetch(`${ep.url}?${qs}`);
+        if (!r.ok) throw new Error(`geocoder ${r.status}`);
+        const j = await r.json();
+        // Remember the endpoint that works so later calls go straight to it.
+        if (i > 0) this.endpoints = this.endpoints.slice(i);
+        const members = j && j.response && j.response.GeoObjectCollection && j.response.GeoObjectCollection.featureMember;
+        return (members || []).map((m: any) => m.GeoObject).filter(Boolean);
+      } catch (e) {
+        last = e;
+      }
+    }
+    throw last instanceof Error ? last : new Error('geocoder unavailable');
   }
+
+  /** Which endpoint is answering (for Settings → Map services). */
+  get endpoint() { return this.endpoints[0] ? this.endpoints[0].url.replace('https://', '') : 'none'; }
 
   async search(text: string, near: LngLat | null, limit = 8): Promise<Place[]> {
     const params: Record<string, string> = { geocode: text, results: String(limit) };

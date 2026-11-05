@@ -158,7 +158,9 @@
 .row-main { flex: 1; min-width: 0; }
 .row-title { font-weight: 600; font-size: 1.0625rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-sub { color: var(--text-2); font-size: .9375rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: .0625rem; }
-.row-trail { color: var(--text-2); font-size: .9375rem; flex: none; }
+.row-trail { color: var(--text-2); font-size: .9375rem; flex: none; text-align: right; }
+.row-eta { color: var(--text); font-weight: 600; }
+.row-trail-sub { font-size: .8125rem; color: var(--text-3); margin-top: .0625rem; }
 
 .group { background: var(--fill-3); border-radius: var(--r-inner); padding: 0 var(--pad); }
 .group .row { margin: 0 calc(var(--pad) * -1); }

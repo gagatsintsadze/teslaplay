@@ -107,7 +107,7 @@ export function mountSettings(app: App, hud: HTMLElement) {
     };
 
     const keys = { ...app.cfg };
-    const keyInput = (k: 'yandexApiKey' | 'yandexSuggestKey' | 'yandexSearchKey' | 'yandexRouterKey' | 'openChargeMapKey', placeholder: string) => {
+    const keyInput = (k: 'yandexApiKey' | 'yandexSuggestKey' | 'yandexSearchKey' | 'yandexRouterKey' | 'yandexGeocoderKey' | 'yandexMatrixKey' | 'openChargeMapKey', placeholder: string) => {
       const input = h('input.input', { type: 'text', value: (keys as any)[k] || '', placeholder, autocomplete: 'off', spellcheck: 'false', 'aria-label': placeholder }) as HTMLInputElement;
       input.addEventListener('input', () => { (keys as any)[k] = input.value.trim(); });
       return input;
@@ -142,12 +142,14 @@ export function mountSettings(app: App, hud: HTMLElement) {
         row('Yandex JS API key', 'Required for the live map', keyInput('yandexApiKey', 'JS API v3 key')),
         row('Geosuggest key', 'Optional · Yandex search as you type', keyInput('yandexSuggestKey', 'Same as JS key')),
         row('Search (Places) key', 'Optional · Yandex businesses and categories', keyInput('yandexSearchKey', 'Same as JS key')),
-        row('Router key', 'Optional · Yandex routes with live traffic', keyInput('yandexRouterKey', 'Same as JS key')),
+        row('Router API key', 'Yandex routes with live traffic', keyInput('yandexRouterKey', 'Router API key')),
+        row('Geocoder API key', 'Addresses and street names', keyInput('yandexGeocoderKey', 'Geocoder API key')),
+        row('Distance Matrix key', 'Drive times on nearby results', keyInput('yandexMatrixKey', 'Distance Matrix key')),
         row('Open Charge Map key', 'Charger power & connectors', keyInput('openChargeMapKey', 'Free key')),
         row('Map language', null, langSelect),
         h('div.set-row', null, h('div.label'), h('button.btn.btn-primary.pressable', {
           onclick: () => {
-            saveLocalKeys({ yandexApiKey: keys.yandexApiKey, yandexSuggestKey: keys.yandexSuggestKey, yandexSearchKey: keys.yandexSearchKey, yandexRouterKey: keys.yandexRouterKey, openChargeMapKey: keys.openChargeMapKey, mapLang: keys.mapLang });
+            saveLocalKeys({ yandexApiKey: keys.yandexApiKey, yandexSuggestKey: keys.yandexSuggestKey, yandexSearchKey: keys.yandexSearchKey, yandexRouterKey: keys.yandexRouterKey, yandexGeocoderKey: keys.yandexGeocoderKey, yandexMatrixKey: keys.yandexMatrixKey, openChargeMapKey: keys.openChargeMapKey, mapLang: keys.mapLang });
             const url = new URL(location.href);
             url.searchParams.delete('demo');
             location.href = url.toString();

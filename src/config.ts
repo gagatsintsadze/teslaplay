@@ -6,6 +6,10 @@ export interface AppConfig {
   yandexSuggestKey: string;
   yandexSearchKey: string;
   yandexRouterKey: string;
+  /** Geocoder API (geocode-maps.yandex.ru/v1). Falls back to the JS API key on the legacy 1.x endpoint. */
+  yandexGeocoderKey: string;
+  /** Distance Matrix API — drive times for nearby results. */
+  yandexMatrixKey: string;
   mapLang: string;
   openChargeMapKey: string;
   demo: boolean;
@@ -24,6 +28,8 @@ const DEFAULTS: AppConfig = {
   yandexSuggestKey: '',
   yandexSearchKey: '',
   yandexRouterKey: '',
+  yandexGeocoderKey: '',
+  yandexMatrixKey: '',
   mapLang: 'en_US',
   openChargeMapKey: '',
   demo: false,
@@ -33,7 +39,7 @@ const DEFAULTS: AppConfig = {
 };
 
 /** Keys a user typed into the app (onboarding / settings) override the deployed config. */
-export type LocalKeys = Partial<Pick<AppConfig, 'yandexApiKey' | 'yandexSuggestKey' | 'yandexSearchKey' | 'yandexRouterKey' | 'openChargeMapKey' | 'mapLang'>>;
+export type LocalKeys = Partial<Pick<AppConfig, 'yandexApiKey' | 'yandexSuggestKey' | 'yandexSearchKey' | 'yandexRouterKey' | 'yandexGeocoderKey' | 'yandexMatrixKey' | 'openChargeMapKey' | 'mapLang'>>;
 
 export function loadConfig(): AppConfig {
   const fromFile = window.TESLAPLAY_CONFIG || {};

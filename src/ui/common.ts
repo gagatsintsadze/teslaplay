@@ -1,5 +1,5 @@
 import { h } from '../core/dom';
-import { formatDistance } from '../core/format';
+import { formatDistance, formatDuration } from '../core/format';
 import type { Place } from '../types';
 import { categoryById, icon } from './icons';
 
@@ -23,7 +23,9 @@ export function placeRow(p: Place, onTap: () => void, opts: { glyph?: HTMLElemen
       h('div.row-title', null, p.name),
       p.subtitle ? h('div.row-sub', null, p.subtitle) : null,
     ),
-    opts.trail !== undefined ? h('div.row-trail.num', null, opts.trail) : p.distance !== undefined ? h('div.row-trail.num', null, formatDistance(p.distance)) : null,
+    opts.trail !== undefined ? h('div.row-trail.num', null, opts.trail)
+      : p.eta !== undefined ? h('div.row-trail.num', null, h('div.row-eta', null, formatDuration(p.eta)), p.distance !== undefined ? h('div.row-trail-sub', null, formatDistance(p.distance)) : null)
+        : p.distance !== undefined ? h('div.row-trail.num', null, formatDistance(p.distance)) : null,
   );
 }
 

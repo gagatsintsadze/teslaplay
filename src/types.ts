@@ -26,6 +26,8 @@ export interface Place {
   category?: string;
   /** Straight-line distance from the user, metres. */
   distance?: number;
+  /** Driving time from the user (Distance Matrix, with traffic), seconds. */
+  eta?: number;
   charger?: ChargerInfo;
 }
 

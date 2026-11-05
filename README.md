@@ -31,7 +31,9 @@ Edit **`public/config.js`** (copied to `dist/config.js`; you can change it on th
 | `yandexApiKey` (required) | Yandex Developer Dashboard → *JavaScript API and HTTP Geocoder* | map; also the HTTP Geocoder | — |
 | `yandexSuggestKey` | *Geosuggest API* (free tier) | search-as-you-type | falls back to Places search, then to the Yandex Geocoder merged with OpenStreetMap (Photon) |
 | `yandexSearchKey` | *Places API* (free tier, 500 requests/day) | businesses, categories (cafés, parking…) | OpenStreetMap: Photon for search, Overpass for nearby categories |
-| `yandexRouterKey` | only if routing isn't enabled on the JS key | driving routes | falls back to OpenStreetMap routing (public OSRM server) |
+| `yandexRouterKey` | *Router API* | driving routes with live traffic (`ymaps3.route`) | falls back to OpenStreetMap routing (public OSRM server) |
+| `yandexGeocoderKey` | *Geocoder API* | addresses, reverse geocoding for street names (`geocode-maps.yandex.ru/v1`) | the JS API key on the legacy `1.x` endpoint |
+| `yandexMatrixKey` | *Distance Matrix API* | real drive times on nearby results, ranked by time | results ranked by straight-line distance |
 | `openChargeMapKey` | openchargemap.org → My profile → API keys (free) | charger power and connector data | chargers come from OpenStreetMap (Overpass, incl. GB/T and power where mapped), then Yandex Places |
 
 **Settings → Map services → Check services** tests every service with the keys in that browser (Yandex map, Geosuggest, Places, routing, Geocoder, traffic; OSRM, Photon, Overpass, Open Charge Map, weather, GPS). It shows what the app is using for search, places, directions and chargers, and *Copy report* puts the results on the clipboard.
@@ -44,7 +46,7 @@ teslaplay.pages.dev
 localhost
 ```
 
-Save it and wait for the key status to say **Active**; that can take a few minutes. If the map still won't load, the app's error screen says whether Yandex rejected the key or the domain. Browser keys are always visible in page source; the referer list is what protects them.
+Do the same for the Router, Geocoder and Distance Matrix keys: they sit in the public `config.js`, so the referer list is what keeps others from spending their quota. Save it and wait for the key status to say **Active**; that can take up to 15 minutes. If the map still won't load, the app's error screen says whether Yandex rejected the key or the domain. Browser keys are always visible in page source; the referer list is what protects them.
 
 ### Yandex plan notes (worth reading before launch)
 - **Live traffic** (`YMapTrafficLayer`) only works on **paid** Yandex tariffs. The app tries to load it, and if your key doesn't allow it, hides the toggle.
@@ -101,6 +103,7 @@ src/
     maneuvers.ts     builds turn instructions from route geometry (see below)
     ev.ts            vehicle presets, energy model, charging-stop planner
     chargers.ts      Open Charge Map along-route search, Yandex fallback
+    matrix.ts        Yandex Distance Matrix: drive times for nearby results
     osm.ts           OpenStreetMap fallbacks: Photon search, Overpass categories and chargers
     diagnostics.ts   Settings → Map services: live check of every service + copyable report
     weather.ts       Open-Meteo weather at origin/destination + elevation profile

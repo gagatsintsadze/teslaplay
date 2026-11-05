@@ -75,8 +75,15 @@ export async function runServiceCheck(app: App): Promise<CheckResult[]> {
   } : null);
 
   add('geocoder', 'Yandex Geocoder', cfg.yandexApiKey && !cfg.demo ? async () => {
-    const r = await new HttpGeocoder(cfg.yandexApiKey, cfg.mapLang).search('Tbilisi', null, 1);
-    return r.length ? `“${r[0].name}”` : 'Answered, no results';
+    const g = app.geocoder || new HttpGeocoder(cfg.yandexGeocoderKey || cfg.yandexApiKey, cfg.mapLang, cfg.yandexApiKey);
+    const r = await g.search('Tbilisi', null, 1);
+    return `${r.length ? `“${r[0].name}”` : 'Answered, no results'} · ${g.endpoint}`;
+  } : null);
+
+  add('matrix', 'Yandex Distance Matrix', app.matrix ? async () => {
+    const r = await app.matrix!.from(here, [near]);
+    if (!r[0]) throw new Error('No time returned');
+    return `${Math.max(1, Math.round(r[0].duration / 60))} min drive to a point ${(r[0].distance / 1000).toFixed(1)} km away`;
   } : null);
 
   add('traffic', 'Yandex live traffic', live ? async () => {
@@ -131,7 +138,7 @@ export function activeProviders(app: App, results: CheckResult[]): { label: stri
   return [
     { label: 'Map', value: ok('map') ? 'Yandex' : app.cfg.demo ? 'Demo' : 'Not loaded' },
     { label: 'Search as you type', value: ok('suggest') ? 'Yandex Geosuggest' : ok('search') ? 'Yandex Places' : [ok('geocoder') && 'Yandex Geocoder', ok('photon') && 'OpenStreetMap'].filter(Boolean).join(' + ') || 'Unavailable' },
-    { label: 'Nearby places', value: ok('search') ? 'Yandex Places' : ok('overpass') ? 'OpenStreetMap' : 'Unavailable' },
+    { label: 'Nearby places', value: (ok('search') ? 'Yandex Places' : ok('overpass') ? 'OpenStreetMap' : 'Unavailable') + (ok('matrix') ? ' · drive times by Yandex' : '') },
     { label: 'Directions', value: ok('router') ? 'Yandex (live traffic)' : ok('osrm') ? 'OpenStreetMap (OSRM)' : 'Unavailable' },
     { label: 'EV chargers', value: ok('ocm') ? 'Open Charge Map' : ok('overpass') ? 'OpenStreetMap' : ok('search') ? 'Yandex Places' : has('ocm') ? 'Unavailable' : 'Unavailable' },
   ];

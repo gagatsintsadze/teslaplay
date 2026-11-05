@@ -18,6 +18,7 @@ import { type EnergyModel, energyModel, evaluateStops, midpoint, planTrip, quick
 import { LocationService } from './services/location';
 import { FallbackRouting, type RoutingService, YandexRouting } from './services/routing';
 import { HttpGeocoder } from './services/geocoder';
+import { DriveTimes } from './services/matrix';
 import { OsmPlaces } from './services/osm';
 import { OsrmRouting } from './services/osrm';
 import { type SearchService, YandexSearch } from './services/search';
@@ -39,6 +40,8 @@ export class App {
   chargers: ChargerService;
   weather: WeatherService;
   osm: OsmPlaces | null = null;
+  geocoder: HttpGeocoder | null = null;
+  matrix: DriveTimes | null = null;
   location = new LocationService();
   voice = new Voice();
   puck = createPuck();
@@ -73,7 +76,9 @@ export class App {
       this.routing = new DemoRouting();
     } else {
       this.osm = new OsmPlaces(cfg.mapLang);
-      const ys = new YandexSearch(new HttpGeocoder(cfg.yandexApiKey, cfg.mapLang), this.osm);
+      this.geocoder = new HttpGeocoder(cfg.yandexGeocoderKey || cfg.yandexApiKey, cfg.mapLang, cfg.yandexApiKey);
+      this.matrix = cfg.yandexMatrixKey ? new DriveTimes(cfg.yandexMatrixKey) : null;
+      const ys = new YandexSearch(this.geocoder, this.osm);
       ys.onDegraded = (what) => {
         if (what === 'search') this.toast('Places from OpenStreetMap — a free Yandex Places key (Settings → Map data) adds Yandex business data.', 'info', 6000);
       };
@@ -298,6 +303,7 @@ export class App {
       this.store.set({ searching: false, results: { title: cat.label, categoryId: cat.id, places } });
       if (places.length) this.fit(places.slice(0, 12).map((p) => p.coord!).concat([near]));
       else this.toast(`No ${cat.label.toLowerCase()} found nearby`, 'info');
+      if (places.length) this.addDriveTimes(id, near, places, cat);
     } catch (e) {
       console.error(e);
       if (id === this.seq.suggest) this.store.set({ searching: false, results: null, panel: 'home' });
@@ -306,6 +312,21 @@ export class App {
           ? 'Charger search needs a free Open Charge Map key or a Yandex Places key (Settings → Map data).'
           : `Finding ${cat.label.toLowerCase()} needs a free Yandex Places key (Settings → Map data).`, 'info', 6500);
       } else this.toast('Search failed. Try again.', 'err');
+    }
+  }
+
+  /** Rank nearby results by real driving time (Distance Matrix) once it arrives. */
+  private async addDriveTimes(id: number, near: LngLat, places: Place[], cat: Category) {
+    if (!this.matrix || !this.matrix.available) return;
+    const head = places.slice(0, 40);
+    try {
+      const times = await this.matrix.from(near, head.map((p) => p.coord!), this.state.settings.avoidTolls);
+      if (id !== this.seq.suggest) return;
+      const timed = head.map((p, i) => (times[i] ? { ...p, eta: times[i]!.duration } : p));
+      timed.sort((a, b) => (a.eta !== undefined ? a.eta : 1e9) - (b.eta !== undefined ? b.eta : 1e9) || (a.distance || 0) - (b.distance || 0));
+      this.store.set({ results: { title: cat.label, categoryId: cat.id, places: timed.concat(places.slice(40)) } });
+    } catch (e) {
+      console.warn('[matrix] drive times unavailable', e);
     }
   }
 
