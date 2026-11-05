@@ -128,7 +128,9 @@ export class OsmEngine implements MapEngine {
               : ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#e9e6e0', 40, '#e1ddd5', 120, '#d6d2ca'],
             'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 13.5, 0, 15, ['coalesce', ['get', 'render_height'], 8]],
             'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'], 13.5, 0, 15, ['coalesce', ['get', 'render_min_height'], 0]],
-            'fill-extrusion-opacity': dark ? 0.92 : 0.96,
+            // Must be fully opaque: any value below 1 composites the whole building layer
+            // translucently, so streets and labels show through the buildings.
+            'fill-extrusion-opacity': 1,
             'fill-extrusion-vertical-gradient': true,
           },
         }, firstSymbol);
@@ -137,6 +139,9 @@ export class OsmEngine implements MapEngine {
     } catch (e) { console.warn('[osm map] 3D buildings unavailable', e); }
     if (!map.getSource('tp-routes')) {
       map.addSource('tp-routes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      // Routes sit on the road *under* the 3D buildings, so buildings stay solid and hide the
+      // line only where it really passes behind them.
+      const below = map.getLayer('tp-buildings') ? 'tp-buildings' : firstSymbol;
       for (const l of ROUTE_LAYERS) {
         map.addLayer({
           id: l.id,
@@ -145,7 +150,7 @@ export class OsmEngine implements MapEngine {
           filter: ['==', ['get', 'role'], l.role],
           layout: { 'line-join': 'round', 'line-cap': 'round' },
           paint: { 'line-color': '#2f8bff', 'line-width': 6 },
-        }, firstSymbol);
+        }, below);
       }
     }
     this.paintRoutes();
