@@ -53,4 +53,10 @@ export interface MapEngine {
   onViewChange(cb: (v: ViewState) => void): void;
   onClick(cb: (e: MapClick) => void): void;
   onLongPress(cb: (e: MapClick) => void): void;
+  /**
+   * Driving overlays (optional): `ahead` is the next stretch of route — buildings standing on it
+   * are flattened and ghosted so they never hide the line; `maneuver` is a short path through
+   * the next turn, drawn as a white arrow.
+   */
+  setNavOverlay?(o: { ahead: LngLat[] | null; maneuver: LngLat[] | null }): void;
 }

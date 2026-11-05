@@ -91,7 +91,8 @@ src/
   map/
     engine.ts        MapEngine interface (the only thing the app knows about maps)
     yandex.ts        Yandex JS API v3 implementation (YMap, markers, features, traffic, listener)
-    osm.ts           OpenStreetMap backup map (self-hosted MapLibre GL + CARTO basemaps, 3D buildings)
+    osm.ts           OpenStreetMap map (self-hosted MapLibre GL): routes, ghosted buildings on the route, turn arrows
+    style.ts         "Drive" map style on OpenFreeMap tiles: real-width asphalt roads with markings, 3D buildings, labels
     demo.ts          offline Web-Mercator engine used by demo mode
     markers.ts       pins, charger badges, the user puck
     gestures.ts      detects real user pans/zooms → drops out of follow mode

@@ -179,7 +179,7 @@ export class App {
   /** Swap to the OpenStreetMap map (before `start`) — used when the Yandex map can't load. */
   useOsmMap(reason: string) {
     this.mapFallbackReason = reason;
-    this.engine = new OsmEngine();
+    this.engine = new OsmEngine(this.cfg.mapLang);
     this.store.set({ trafficAvailable: false });
   }
 

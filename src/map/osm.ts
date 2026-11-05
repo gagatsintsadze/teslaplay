@@ -1,6 +1,7 @@
 import type { LngLat, LngLatBounds } from '../types';
 import type { MapClick, MapEngine, MarkerSpec, Padding, RouteLine, ViewRequest, ViewState } from './engine';
 import { attachGestureWatcher } from './gestures';
+import { buildStyle } from './style';
 
 declare global {
   interface Window { maplibregl?: any }
@@ -12,13 +13,9 @@ declare global {
  * MapLibre is self-hosted under vendor/ and only downloaded when needed.
  */
 
-const STYLES = {
-  dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-  light: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
-};
 const VENDOR = 'vendor/maplibre/maplibre-gl';
-/** OpenFreeMap: OpenMapTiles-schema vector tiles with building heights (render_height), free, no key. */
-const BUILDINGS_TILES = 'https://tiles.openfreemap.org/planet';
+/** Buildings within this many metres of the route ahead are flattened and ghosted while driving. */
+const GHOST_M = 32;
 const LOAD_TIMEOUT = 15000;
 
 let loading: Promise<any> | null = null;
@@ -67,6 +64,10 @@ export class OsmEngine implements MapEngine {
   private clickCbs: ((e: MapClick) => void)[] = [];
   private longCbs: ((e: MapClick) => void)[] = [];
   private viewQueued = false;
+  private ahead: LngLat[] | null = null;
+  private maneuver: LngLat[] | null = null;
+
+  constructor(private lang = 'en_US') {}
 
   async init(container: HTMLElement, opts: { center: LngLat; zoom: number; theme: 'light' | 'dark' }) {
     const gl = (this.gl = await loadMapLibre());
@@ -74,7 +75,7 @@ export class OsmEngine implements MapEngine {
     while (container.firstChild) container.removeChild(container.firstChild);
     const map = (this.map = new gl.Map({
       container,
-      style: STYLES[opts.theme],
+      style: buildStyle(opts.theme, this.lang),
       center: opts.center,
       zoom: opts.zoom,
       pitch: 0,
@@ -99,67 +100,67 @@ export class OsmEngine implements MapEngine {
     this.attachLongPress(container);
   }
 
-  /** Our additions on top of the basemap: 3D buildings and the route layers. Re-run after style swaps. */
+  /** Dynamic layers on top of the style: routes, chevrons, ghost buildings, maneuver arrow. Re-run after style swaps. */
   private decorateStyle() {
     const map = this.map;
-    const style = map.getStyle();
-    if (!style) return;
-    const layers: any[] = style.layers || [];
-    // Insert our layers above *every* road/area layer and below the labels. (Basemaps can have
-    // a label early on — CARTO puts a waterway label before all the roads — and inserting before
-    // that let roads paint over the 3D buildings, making them look see-through.)
-    let lastGround = -1;
-    layers.forEach((l, i) => { if (l.type !== 'symbol' && !String(l.id).startsWith('tp-')) lastGround = i; });
-    const firstSymbol = layers.slice(lastGround + 1).filter((l) => !String(l.id).startsWith('tp-'))[0];
-    const above = firstSymbol ? firstSymbol.id : undefined;
+    if (!map.getStyle()) return;
     const dark = this.theme === 'dark';
-    // Real 3D buildings: heights from OpenStreetMap (height / building:levels) via OpenFreeMap.
-    // The basemap's own flat building footprints are hidden so the extrusions read cleanly.
-    layers.filter((l) => l['source-layer'] === 'building' && l.id !== 'tp-buildings').forEach((l) => {
-      try { map.setLayoutProperty(l.id, 'visibility', 'none'); } catch { /* ignore */ }
-    });
-    try {
-      if (!map.getSource('tp-ofm')) map.addSource('tp-ofm', { type: 'vector', url: BUILDINGS_TILES });
-      if (!map.getLayer('tp-buildings')) {
-        map.addLayer({
-          id: 'tp-buildings',
-          type: 'fill-extrusion',
-          source: 'tp-ofm',
-          'source-layer': 'building',
-          minzoom: 13.5,
-          filter: ['!=', ['get', 'hide_3d'], true],
-          paint: {
-            'fill-extrusion-color': dark
-              ? ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#2c3038', 40, '#363b46', 120, '#424a5a']
-              : ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#ebe3d6', 40, '#e2d9cb', 120, '#d6ccbc'],
-            'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 13.5, 0, 15, ['coalesce', ['get', 'render_height'], 8]],
-            'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'], 13.5, 0, 15, ['coalesce', ['get', 'render_min_height'], 0]],
-            // Must be fully opaque: any value below 1 composites the whole building layer
-            // translucently, so streets and labels show through the buildings.
-            'fill-extrusion-opacity': 1,
-            'fill-extrusion-vertical-gradient': true,
-          },
-        }, above);
-      }
-      map.setLight({ anchor: 'viewport', color: '#ffffff', intensity: dark ? 0.4 : 0.5, position: [1.15, 210, 30] });
-    } catch (e) { console.warn('[osm map] 3D buildings unavailable', e); }
+    const before = map.getLayer('tp-buildings') ? 'tp-buildings' : undefined;
+    map.setLight({ anchor: 'viewport', color: '#ffffff', intensity: dark ? 0.4 : 0.5, position: [1.15, 210, 30] });
+
+    // Routes sit on the road beneath the buildings.
     if (!map.getSource('tp-routes')) {
       map.addSource('tp-routes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-      // Routes sit on the road *under* the 3D buildings, so buildings stay solid and hide the
-      // line only where it really passes behind them.
-      const below = map.getLayer('tp-buildings') ? 'tp-buildings' : above;
       for (const l of ROUTE_LAYERS) {
         map.addLayer({
-          id: l.id,
-          type: 'line',
-          source: 'tp-routes',
+          id: l.id, type: 'line', source: 'tp-routes',
           filter: ['==', ['get', 'role'], l.role],
           layout: { 'line-join': 'round', 'line-cap': 'round' },
           paint: { 'line-color': '#2f8bff', 'line-width': 6 },
-        }, below);
+        }, before);
       }
+      // Direction chevrons along the active route.
+      map.addLayer({
+        id: 'tp-route-chevrons', type: 'symbol', source: 'tp-routes', minzoom: 13.5,
+        filter: ['==', ['get', 'role'], 'primary'],
+        layout: {
+          'symbol-placement': 'line', 'symbol-spacing': ['interpolate', ['linear'], ['zoom'], 14, 60, 19, 110],
+          'text-field': '›', 'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['exponential', 1.6], ['zoom'], 14, 13, 19, 34],
+          'text-keep-upright': false, 'text-rotation-alignment': 'map', 'text-pitch-alignment': 'map',
+          'text-allow-overlap': true, 'text-ignore-placement': true,
+        },
+        paint: { 'text-color': '#ffffff', 'text-opacity': 0.9 },
+      }, before);
+    }
+
+    // Ghost copy of the buildings: those standing on the route ahead, low and see-through.
+    if (map.getLayer('tp-buildings') && !map.getLayer('tp-buildings-ghost')) {
+      const b = map.getLayer('tp-buildings');
+      map.addLayer({
+        // Placed beneath the route lines so the route stays crisp over the flattened slabs.
+        id: 'tp-buildings-ghost', type: 'fill-extrusion', source: b.source, 'source-layer': b.sourceLayer, minzoom: 13.5,
+        filter: ['has', '__tp_never__'],
+        paint: {
+          'fill-extrusion-color': map.getPaintProperty('tp-buildings', 'fill-extrusion-color'),
+          'fill-extrusion-height': ['min', ['coalesce', ['get', 'render_height'], 8], 2.5],
+          'fill-extrusion-base': 0,
+          'fill-extrusion-opacity': 0.35,
+        },
+      }, map.getLayer('tp-route-alt-casing') ? 'tp-route-alt-casing' : 'tp-buildings');
+    }
+
+    // Maneuver arrow (white, above the buildings so it is always readable).
+    if (!map.getSource('tp-mv')) {
+      map.addSource('tp-mv', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      const w = (m: number, minPx: number) => ['interpolate', ['exponential', 2], ['zoom'], 14, minPx, 20, Math.max(minPx, m * 2 ** 20 / 116860)];
+      map.addLayer({ id: 'tp-mv-casing', type: 'line', source: 'tp-mv', filter: ['==', ['geometry-type'], 'LineString'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#0b4fc4', 'line-width': w(6.2, 12) } });
+      map.addLayer({ id: 'tp-mv-line', type: 'line', source: 'tp-mv', filter: ['==', ['geometry-type'], 'LineString'], layout: { 'line-cap': 'butt', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': w(4.2, 8) } });
+      // Arrow head: a real triangle on the ground (no font glyph needed).
+      map.addLayer({ id: 'tp-mv-head-casing', type: 'line', source: 'tp-mv', filter: ['==', ['geometry-type'], 'Polygon'], layout: { 'line-join': 'round' }, paint: { 'line-color': '#0b4fc4', 'line-width': w(1, 2.5) } });
+      map.addLayer({ id: 'tp-mv-head', type: 'fill', source: 'tp-mv', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#ffffff' } });
     }
     this.paintRoutes();
+    this.applyNavOverlay();
   }
 
   private queueView() {
@@ -219,7 +220,7 @@ export class OsmEngine implements MapEngine {
     this.theme = theme;
     if (!this.map) return;
     // Full reload (no diff) so `style.load` fires and our buildings and route layers are re-added.
-    this.map.setStyle(STYLES[theme], { diff: false });
+    this.map.setStyle(buildStyle(theme, this.lang), { diff: false });
   }
 
   async setTraffic(_visible: boolean): Promise<boolean> { return false; }
@@ -288,18 +289,20 @@ export class OsmEngine implements MapEngine {
     if (!src) return;
     const css = getComputedStyle(document.documentElement);
     const v = (name: string, fb: string) => css.getPropertyValue(name).trim() || fb;
-    const colors: Record<string, { casing: string; fill: string; cw: number; fw: number }> = {
-      alternative: { casing: v('--route-alt-casing', '#3a4250'), fill: v('--route-alt', '#7e8a9c'), cw: 10, fw: 6 },
-      traveled: { casing: '#4a5160', fill: '#8a93a3', cw: 10, fw: 6 },
-      primary: { casing: v('--route-casing', '#0b4fc4'), fill: v('--route', '#2f8bff'), cw: 12.5, fw: 8 },
+    // [casing px when zoomed out, fill px when zoomed out, casing metres, fill metres]
+    const colors: Record<string, { casing: string; fill: string; cw: number; fw: number; cm: number; fm: number }> = {
+      alternative: { casing: v('--route-alt-casing', '#3a4250'), fill: v('--route-alt', '#7e8a9c'), cw: 7, fw: 4.5, cm: 8, fm: 6 },
+      traveled: { casing: '#4a5160', fill: '#8a93a3', cw: 7, fw: 4.5, cm: 8, fm: 6 },
+      primary: { casing: v('--route-casing', '#0b4fc4'), fill: v('--route', '#2f8bff'), cw: 9, fw: 6, cm: 9.5, fm: 7.5 },
     };
     for (const l of ROUTE_LAYERS) {
       const c = colors[l.role];
       if (!map.getLayer(l.id)) continue;
       map.setPaintProperty(l.id, 'line-color', l.part === 'casing' ? c.casing : c.fill);
-      const w = l.part === 'casing' ? c.cw : c.fw;
-      // Wide and confident in the close driving view, slim when zoomed out.
-      map.setPaintProperty(l.id, 'line-width', ['interpolate', ['exponential', 1.5], ['zoom'], 8, w * 0.4, 14, w * 0.8, 17, w * 1.35, 19.5, w * 2.3]);
+      const px = l.part === 'casing' ? c.cw : c.fw;
+      const m = l.part === 'casing' ? c.cm : c.fm;
+      // Fixed pixels when zoomed out; at street level it covers the lane like a painted road.
+      map.setPaintProperty(l.id, 'line-width', ['interpolate', ['exponential', 2], ['zoom'], 8, px * 0.6, 14, px, 20, Math.max(px, (m * 2 ** 20) / 116860)]);
     }
     src.setData({
       type: 'FeatureCollection',
@@ -342,6 +345,48 @@ export class OsmEngine implements MapEngine {
       this.userEl = el;
     } else {
       this.user.setLngLat(coord);
+    }
+  }
+
+  setNavOverlay(o: { ahead: LngLat[] | null; maneuver: LngLat[] | null }) {
+    this.ahead = o.ahead && o.ahead.length > 1 ? o.ahead : null;
+    this.maneuver = o.maneuver && o.maneuver.length > 1 ? o.maneuver : null;
+    this.applyNavOverlay();
+  }
+
+  private applyNavOverlay() {
+    const map = this.map;
+    if (!map || !map.getLayer('tp-buildings')) return;
+    const solid: any = ['!', ['has', 'hide_3d']];
+    if (this.ahead) {
+      const line = { type: 'LineString', coordinates: this.ahead };
+      map.setFilter('tp-buildings', ['all', solid, ['>', ['distance', line], GHOST_M]]);
+      if (map.getLayer('tp-buildings-ghost')) map.setFilter('tp-buildings-ghost', ['all', solid, ['<=', ['distance', line], GHOST_M]]);
+    } else {
+      map.setFilter('tp-buildings', solid);
+      if (map.getLayer('tp-buildings-ghost')) map.setFilter('tp-buildings-ghost', ['has', '__tp_never__']);
+    }
+    const src = map.getSource('tp-mv');
+    if (src) {
+      const m = this.maneuver;
+      const feats: any[] = [];
+      if (m) {
+        // Shaft along the route through the turn, then a triangular head pointing out of it.
+        const a = m[m.length - 2];
+        const b = m[m.length - 1];
+        const kx = 111320 * Math.cos((b[1] * Math.PI) / 180);
+        const ky = 110540;
+        const dx = (b[0] - a[0]) * kx;
+        const dy = (b[1] - a[1]) * ky;
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len;
+        const uy = dy / len;
+        const at = (along: number, side: number): LngLat => [b[0] + (ux * along - uy * side) / kx, b[1] + (uy * along + ux * side) / ky];
+        const head = [at(-0.5, 6), at(10, 0), at(-0.5, -6), at(-0.5, 6)];
+        feats.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: m } });
+        feats.push({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [head] } });
+      }
+      src.setData({ type: 'FeatureCollection', features: feats });
     }
   }
 

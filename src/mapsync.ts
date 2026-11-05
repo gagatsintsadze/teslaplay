@@ -1,5 +1,5 @@
 import type { App } from './app';
-import { slice } from './core/geo';
+import { simplify, slice } from './core/geo';
 import { shallowEqualArray } from './core/store';
 import type { MarkerSpec, RouteLine } from './map/engine';
 import { chargerMarker, cityLabel, pinMarker } from './map/markers';
@@ -78,6 +78,31 @@ export function bindMap(app: App) {
   store.select((s) => (s.nav ? s.nav.progress : 0), (p) => {
     if (store.get().navigating && Math.abs(p - drawnAt) > 30) renderRoutes();
   });
+
+  // ── driving overlays: ghost buildings on the road ahead, white arrow through the next turn ──
+  if (engine.setNavOverlay) {
+    const TURNS = new Set(['left', 'right', 'slight-left', 'slight-right', 'sharp-left', 'sharp-right', 'uturn', 'keep-left', 'keep-right', 'roundabout', 'exit-left', 'exit-right', 'fork-left', 'fork-right']);
+    let last = '';
+    store.select((s) => {
+      if (!s.navigating || !s.navRoute || !s.nav) return 'off';
+      const n = s.nav;
+      const near = n.distToManeuver < 380 && TURNS.has(n.maneuver.type);
+      return `${n.routeId}|${Math.floor(n.progress / 120)}|${near ? n.maneuverIndex : -1}`;
+    }, (key) => {
+      if (key === last) return;
+      last = key;
+      const s = store.get();
+      if (key === 'off' || !s.navRoute || !s.nav) { engine.setNavOverlay!({ ahead: null, maneuver: null }); return; }
+      const r = s.navRoute;
+      const end = r.cum[r.cum.length - 1];
+      const p = s.nav.progress;
+      const ahead = simplify(slice(r.coords, r.cum, Math.max(0, p - 30), Math.min(end, p + 900)), 4);
+      const m = s.nav.maneuver;
+      const near = s.nav.distToManeuver < 380 && TURNS.has(m.type);
+      const maneuver = near ? simplify(slice(r.coords, r.cum, Math.max(0, m.at - 38), Math.min(end, m.at + 28)), 0.8) : null;
+      engine.setNavOverlay!({ ahead, maneuver });
+    });
+  }
 
   // ── insets ──
   const pad = () => engine.setPadding(app.padding());
