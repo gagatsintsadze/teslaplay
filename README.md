@@ -2,10 +2,10 @@
 
 A web navigation app built to run in Tesla's built-in browser in places where the car's own
 navigation falls short (Georgia, much of Central Asia). It uses Yandex Maps JS API v3 for the map,
-search, traffic and routing, and adds EV trip planning, turn-by-turn guidance and an Apple-style interface
+search, traffic and routing, and adds EV trip planning, turn-by-turn guidance and an interface in Apple's Liquid Glass design language,
 sized for a car screen.
 
-- **Zero runtime dependencies.** TypeScript compiled to one ~118 KB script (≈35 KB gzipped) plus ~34 KB of CSS. It stays light on older Tesla hardware (MCU2).
+- **Zero runtime dependencies.** TypeScript compiled to one ~132 KB script (≈48 KB gzipped) plus ~42 KB of CSS. It stays light on older Tesla hardware (MCU2).
 - **Demo mode** runs without any API key or network access, so you can work on the UI without spending Yandex quota.
 
 ---
