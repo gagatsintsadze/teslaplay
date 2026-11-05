@@ -18,6 +18,7 @@ import { type EnergyModel, energyModel, evaluateStops, midpoint, planTrip, quick
 import { LocationService } from './services/location';
 import { FallbackRouting, type RoutingService, YandexRouting } from './services/routing';
 import { HttpGeocoder } from './services/geocoder';
+import { OsmPlaces } from './services/osm';
 import { OsrmRouting } from './services/osrm';
 import { type SearchService, YandexSearch } from './services/search';
 import { Voice } from './services/voice';
@@ -37,6 +38,7 @@ export class App {
   routing: RoutingService;
   chargers: ChargerService;
   weather: WeatherService;
+  osm: OsmPlaces | null = null;
   location = new LocationService();
   voice = new Voice();
   puck = createPuck();
@@ -70,9 +72,10 @@ export class App {
       this.search = new DemoSearch();
       this.routing = new DemoRouting();
     } else {
-      const ys = new YandexSearch(new HttpGeocoder(cfg.yandexApiKey, cfg.mapLang));
+      this.osm = new OsmPlaces(cfg.mapLang);
+      const ys = new YandexSearch(new HttpGeocoder(cfg.yandexApiKey, cfg.mapLang), this.osm);
       ys.onDegraded = (what) => {
-        if (what === 'search') this.toast('Showing addresses only — add a free Yandex Places key in Settings → Map data for businesses.', 'info', 6500);
+        if (what === 'search') this.toast('Places from OpenStreetMap — a free Yandex Places key (Settings → Map data) adds Yandex business data.', 'info', 6000);
       };
       this.search = ys;
       let warned = false;
@@ -80,7 +83,7 @@ export class App {
         if (!warned) { warned = true; this.toast('Yandex routing isn’t enabled on this key — using OpenStreetMap routes.', 'warn', 6500); }
       });
     }
-    this.chargers = demo ? new DemoChargers() : new LiveChargers(cfg.openChargeMapKey, this.search);
+    this.chargers = demo ? new DemoChargers() : new LiveChargers(cfg.openChargeMapKey, this.search, this.osm!);
     this.weather = new WeatherService(demo);
   }
 
@@ -124,7 +127,8 @@ export class App {
 
     if (!this.measured) {
       this.measured = true;
-      measureSluggish().then((slow) => {
+      // Measure once the map has settled (tile loading right after init would skew it).
+      new Promise((r) => setTimeout(r, 4000)).then(() => measureSluggish()).then((slow) => {
         this.measuredSlow = slow;
         if (slow && this.state.settings.glass === 'auto') this.applySettings(this.state.settings, false);
       });
@@ -147,7 +151,8 @@ export class App {
 
   private resolveMaterial(s: Settings, slow: boolean): Material {
     const order: Material[] = ['liquid', 'frosted', 'solid'];
-    let m: Material = s.glass === 'auto' ? (slow ? 'solid' : lensSupported ? 'liquid' : 'frosted') : s.glass;
+    // Low-power Tesla browsers get Solid; a device that merely measured slow keeps the glass but drops lensing.
+    let m: Material = s.glass === 'auto' ? (likelyLowEnd ? 'solid' : slow || !lensSupported ? 'frosted' : 'liquid') : s.glass;
     if (m === 'liquid' && !lensSupported) m = 'frosted';
     if (s.glass === 'auto') m = order[Math.min(2, order.indexOf(m) + this.materialStep)];
     return m;

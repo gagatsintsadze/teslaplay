@@ -1,6 +1,7 @@
 import { distance } from '../core/geo';
 import type { LngLat, LngLatBounds, Place } from '../types';
 import type { HttpGeocoder } from './geocoder';
+import type { OsmPlaces } from './osm';
 
 export interface ReverseResult { name: string; street?: string; subtitle?: string }
 
@@ -25,6 +26,7 @@ const withDistance = (p: Place, near: LngLat | null): Place =>
  *   1. Geosuggest (`ymaps3.suggest`)   — search-as-you-type      [Geosuggest key]
  *   2. Places/Search (`ymaps3.search`) — businesses, place details [Places key]
  *   3. HTTP Geocoder                   — addresses, streets, cities [the JS API key itself]
+ *      + OpenStreetMap (Photon / Overpass) — businesses and categories, no key
  * A product that fails once (no key / not enabled) is skipped for the rest of the session.
  */
 export class YandexSearch implements SearchService {
@@ -32,7 +34,15 @@ export class YandexSearch implements SearchService {
   private searchBroken = false;
   onDegraded: ((what: 'suggest' | 'search') => void) | null = null;
 
-  constructor(private geocoder: HttpGeocoder) {}
+  constructor(private geocoder: HttpGeocoder, private osm: OsmPlaces) {}
+
+  /** Which provider is currently answering each kind of query (for Settings → Map services). */
+  get providers() {
+    return {
+      suggest: !this.suggestBroken ? 'Yandex Geosuggest' : !this.searchBroken ? 'Yandex Places' : 'Yandex Geocoder + OpenStreetMap',
+      places: !this.searchBroken ? 'Yandex Places' : 'OpenStreetMap',
+    };
+  }
 
   private get y() { return window.ymaps3; }
 
@@ -48,8 +58,8 @@ export class YandexSearch implements SearchService {
     if (!this.suggestBroken) {
       try {
         const opts: any = { text: q, limit: 8 };
-        if (near) { opts.center = near; opts.span = [0.6, 0.4]; }
-        const items: any[] = await this.y.suggest(opts);
+        if (near) opts.bounds = [[near[0] - 0.3, near[1] + 0.2], [near[0] + 0.3, near[1] - 0.2]];
+        const items: any[] = await timed(this.y.suggest(opts), 'suggest');
         return (items || []).map((it, i) => {
           const tags: string[] = it.tags || [];
           const business = tags.some((t) => /business|бизнес/i.test(t));
@@ -70,13 +80,19 @@ export class YandexSearch implements SearchService {
     if (!this.searchBroken) {
       try { return await this.search(q, near, 8); } catch (e) { this.markBroken('search', e); }
     }
-    return this.geocoder.search(q, near, 8);
+    // No Yandex search products on this key: Yandex Geocoder (best for Georgian addresses)
+    // merged with OpenStreetMap (businesses, landmarks).
+    const [geo, osm] = await Promise.all([
+      this.geocoder.search(q, near, 6).catch((e) => { console.warn('[search] geocoder', e); return [] as Place[]; }),
+      this.osm.search(q, near, 8).catch((e) => { console.warn('[search] photon', e); return [] as Place[]; }),
+    ]);
+    return mergePlaces(osm, geo, 8);
   }
 
   private async search(text: string, near: LngLat | null, limit: number, extra: any = {}): Promise<Place[]> {
     const opts: any = { text, limit, ...extra };
     if (near && !opts.bounds) { opts.center = near; opts.span = opts.span || [0.5, 0.35]; }
-    const feats: any[] = await this.y.search(opts);
+    const feats: any[] = await timed(this.y.search(opts), 'search');
     return (feats || []).map((f, i) => withDistance(featureToPlace(f, i), near));
   }
 
@@ -100,18 +116,19 @@ export class YandexSearch implements SearchService {
     return { ...p, coord: g[0].coord };
   }
 
-  async category(_id: string, query: string, near: LngLat, bounds?: LngLatBounds): Promise<Place[]> {
-    if (this.searchBroken) throw new Error('places-key');
-    const extra: any = { type: ['businesses'] };
-    if (bounds) extra.bounds = bounds;
-    else extra.span = [0.06, 0.04];
-    try {
-      const out = await this.search(query, near, 20, extra);
-      return out.sort((a, b) => (a.distance || 0) - (b.distance || 0));
-    } catch (e) {
-      this.markBroken('search', e);
-      throw new Error('places-key');
+  async category(id: string, query: string, near: LngLat, bounds?: LngLatBounds): Promise<Place[]> {
+    if (!this.searchBroken) {
+      const extra: any = { type: ['businesses'] };
+      if (bounds) extra.bounds = bounds;
+      else extra.span = [0.06, 0.04];
+      try {
+        const out = await this.search(query, near, 20, extra);
+        return out.sort((a, b) => (a.distance || 0) - (b.distance || 0));
+      } catch (e) {
+        this.markBroken('search', e);
+      }
     }
+    return this.osm.nearby(id, near);
   }
 
   async reverse(coord: LngLat): Promise<ReverseResult | null> {
@@ -127,8 +144,34 @@ export class YandexSearch implements SearchService {
         this.markBroken('search', e);
       }
     }
-    return this.geocoder.reverse(coord);
+    try {
+      const r = await this.geocoder.reverse(coord);
+      if (r) return r;
+    } catch (e) {
+      console.warn('[search] geocoder reverse', e);
+    }
+    return this.osm.reverse(coord);
   }
+}
+
+/** Reject Yandex calls that hang so the fallbacks get a chance. */
+function timed<T>(p: Promise<T>, what: string, ms = 8000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`Yandex ${what} timed out`)), ms);
+    Promise.resolve(p).then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
+}
+
+const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+/** Interleave two result lists, dropping near-duplicates (same name within 250 m). */
+export function mergePlaces(a: Place[], b: Place[], limit: number): Place[] {
+  const out: Place[] = [];
+  const dup = (p: Place) => out.some((q) => p.coord && q.coord && distance(p.coord, q.coord) < 250 && (norm(q.name).includes(norm(p.name)) || norm(p.name).includes(norm(q.name))));
+  for (let i = 0; out.length < limit && (i < a.length || i < b.length); i++) {
+    for (const p of [a[i], b[i]]) if (p && out.length < limit && !dup(p)) out.push(p);
+  }
+  return out;
 }
 
 function featureToPlace(f: any, i: number): Place {

@@ -17,6 +17,7 @@
   animation: sheet-in .62s var(--spring-soft) both;
 }
 .sheet.glass { background: var(--glass-sheen), var(--sheet-tint); }
+.mat-solid .sheet.glass { background: var(--solid); }
 [data-side="right"] .sheet { right: auto; left: var(--edge); transform-origin: calc(var(--tap) / 2) calc(3rem + .75rem + var(--tap) / 2); }
 .sheet.out { animation: sheet-out var(--t-med) var(--ease-in) both; }
 @keyframes sheet-in { from { opacity: 0; transform: scale(.12); border-radius: 3rem; } 40% { opacity: 1; } }
@@ -52,3 +53,13 @@
 .onboard .btn { margin-top: .75rem; }
 .onboard .link { display: block; margin: 1rem auto 0; color: #0a84ff; font-weight: 600; height: 2.75rem; }
 .onboard .err { color: #ff453a; font-weight: 600; margin-top: .75rem; font-size: .9375rem; }
+
+/* Map services check */
+.svc { display: inline-flex; align-items: center; gap: .625rem; flex: none; }
+.svc-ms { font-size: .8125rem; color: var(--text-3); font-weight: 600; }
+.svc-dot { width: 1.75rem; height: 1.75rem; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--gray); }
+.svc.ok .svc-dot { background: var(--green); }
+.svc.bad .svc-dot { background: var(--red); }
+.svc.skip .svc-dot { background: var(--fill); color: var(--text-2); }
+.svc-using { flex: none; font-weight: 600; color: var(--accent); text-align: right; max-width: 60%; }
+.set-row .label small { overflow-wrap: anywhere; }

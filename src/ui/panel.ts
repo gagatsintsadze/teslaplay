@@ -193,7 +193,8 @@ function placeView(app: App, p: Place): Node[] {
     if (c.connectors.length) info.push(infoRow('Connectors', c.connectors.join(' · ')));
     if (c.points) info.push(infoRow('Charge points', String(c.points)));
     if (c.cost) info.push(infoRow('Cost', c.cost));
-    info.push(infoRow('Source', c.source === 'ocm' ? 'Open Charge Map' : c.source === 'yandex' ? 'Yandex Maps' : 'Demo data'));
+    if (c.operator && c.operator !== p.name) info.push(infoRow('Operator', c.operator));
+    info.push(infoRow('Source', c.source === 'ocm' ? 'Open Charge Map' : c.source === 'osm' ? 'OpenStreetMap' : c.source === 'yandex' ? 'Yandex Maps' : 'Demo data'));
   }
   if (p.coord) info.push(infoRow('Coordinates', `${p.coord[1].toFixed(5)}, ${p.coord[0].toFixed(5)}`));
 

@@ -12,7 +12,7 @@ export interface ChargerInfo {
   operational?: boolean;
   cost?: string;
   operator?: string;
-  source: 'ocm' | 'yandex' | 'demo';
+  source: 'ocm' | 'osm' | 'yandex' | 'demo';
 }
 
 export interface Place {

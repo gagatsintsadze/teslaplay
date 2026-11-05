@@ -126,7 +126,11 @@ export class YandexRouting implements RoutingService {
         }));
       } catch { /* steps are optional */ }
       const flags = props.flags || {};
-      out.push(buildRoute(coords, props.length, props.duration, !!(flags.hasTolls || flags.hasNonTransactionalTolls), rawSteps, req));
+      // `length` / `duration` are optional on the route feature; Yandex's own route control sums the steps.
+      const sum = (k: 'distance' | 'duration') => rawSteps.reduce((a, st) => a + (st[k] || 0), 0);
+      const length = typeof props.length === 'number' && props.length > 0 ? props.length : sum('distance');
+      const duration = typeof props.duration === 'number' && props.duration > 0 ? props.duration : sum('duration');
+      out.push(buildRoute(coords, length, duration, !!(flags.hasTolls || flags.hasNonTransactionalTolls), rawSteps, req));
     }
     if (!out.length) throw new Error('No route found');
     // Distinct alternatives only.

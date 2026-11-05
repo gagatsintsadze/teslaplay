@@ -8,6 +8,7 @@ import type { Material } from './glass';
 import { lensSupported } from './glass';
 import { icon } from './icons';
 import { segmented } from './segmented';
+import { activeProviders, type CheckResult, reportText, runServiceCheck } from '../services/diagnostics';
 
 function glassNote(material: Material, choice: Settings['glass']): string {
   if (choice === 'liquid' && material !== 'liquid') return 'Lensing needs a Chromium browser — using Frosted';
@@ -42,6 +43,41 @@ export function mountSettings(app: App, hud: HTMLElement) {
     }
   });
   store.select((s) => [s.settings, s.material, s.trafficAvailable], () => { if (body) render(); }, { equals: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] });
+
+  // Map services check (kept across re-renders while the sheet is open)
+  let checks: CheckResult[] | null = null;
+  let checking = false;
+  const runCheck = async () => {
+    if (checking) return;
+    checking = true;
+    render();
+    try { checks = await runServiceCheck(app); } finally { checking = false; }
+    render();
+  };
+  const copyReport = () => {
+    if (!checks) return;
+    const text = reportText(app, checks);
+    const done = () => app.toast('Report copied — paste it into the chat', 'ok');
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+    else fallbackCopy(text, done);
+  };
+
+  function servicesGroup(row: (label: string, sub: string | null, control: Node) => HTMLElement) {
+    const status = (r: CheckResult) => h('span.svc', { class: r.ok === null ? 'skip' : r.ok ? 'ok' : 'bad' },
+      r.ms !== undefined && r.ok !== null ? h('span.svc-ms.num', null, `${r.ms} ms`) : null,
+      h('span.svc-dot', null, icon(r.ok === null ? 'minus' : r.ok ? 'check' : 'close', 14)));
+    const rows: Node[] = [];
+    if (checks) {
+      activeProviders(app, checks).forEach((p) => rows.push(row(p.label, null, h('span.svc-using', null, p.value))));
+      checks.forEach((r) => rows.push(row(r.name, r.detail, status(r))));
+    }
+    rows.push(h('div.set-row', null,
+      h('div.label', null, checks ? 'Run again after changing keys' : 'Check what works with these keys', h('small', null, 'Tests the map, search, directions, chargers and GPS from this browser')),
+      checks ? h('button.btn.btn-plain.pressable', { onclick: copyReport, style: { minHeight: '2.75rem' } }, 'Copy report') : null,
+      h('button.btn.btn-tinted.pressable', { onclick: runCheck, disabled: checking, style: { minHeight: '2.75rem' } }, checking ? h('span.spinner', { style: { width: '1.1rem', height: '1.1rem', borderWidth: '2px' } }) : null, checking ? 'Checking…' : checks ? 'Check again' : 'Check services'),
+    ));
+    return rows;
+  }
 
   function render() {
     if (!body) return;
@@ -101,11 +137,12 @@ export function mountSettings(app: App, hud: HTMLElement) {
         row('Charge up to', 'On trip charging stops', seg('maxsoc', st.maxChargeSoc, [[70, '70%'], [80, '80%'], [90, '90%']], (m) => set({ maxChargeSoc: m }))),
       ),
       h('div.set-foot', null, 'Range estimates use speed, outside temperature and elevation. Tune consumption to match your car’s trip meter for best accuracy.'),
+      group('Map services', ...servicesGroup(row)),
       group('Map data',
         row('Yandex JS API key', 'Required for the live map', keyInput('yandexApiKey', 'JS API v3 key')),
-        row('Geosuggest key', 'Optional · search as you type', keyInput('yandexSuggestKey', 'Same as JS key')),
-        row('Search (Places) key', 'Optional · places, street names', keyInput('yandexSearchKey', 'Same as JS key')),
-        row('Router key', 'Optional · driving routes', keyInput('yandexRouterKey', 'Same as JS key')),
+        row('Geosuggest key', 'Optional · Yandex search as you type', keyInput('yandexSuggestKey', 'Same as JS key')),
+        row('Search (Places) key', 'Optional · Yandex businesses and categories', keyInput('yandexSearchKey', 'Same as JS key')),
+        row('Router key', 'Optional · Yandex routes with live traffic', keyInput('yandexRouterKey', 'Same as JS key')),
         row('Open Charge Map key', 'Charger power & connectors', keyInput('openChargeMapKey', 'Free key')),
         row('Map language', null, langSelect),
         h('div.set-row', null, h('div.label'), h('button.btn.btn-primary.pressable', {
@@ -117,7 +154,7 @@ export function mountSettings(app: App, hud: HTMLElement) {
           },
         }, 'Save & reload')),
       ),
-      h('div.set-foot', null, 'Keys entered here are stored only in this browser. For a deployment, put them in config.js and restrict them to your domain in the Yandex Developer Dashboard.'),
+      h('div.set-foot', null, 'Without the optional keys, search uses the Yandex Geocoder plus OpenStreetMap, directions use OpenStreetMap routing, and chargers come from OpenStreetMap. Keys entered here are stored only in this browser; for a deployment put them in config.js and restrict them to your domain in the Yandex Developer Dashboard.'),
       group('Developer',
         row('Simulation controls', 'Adds “Simulate” next to Go', sw(st.devTools, () => set({ devTools: !st.devTools }), 'Simulation controls')),
         row('Demo mode', s.demo ? 'Running with sample data' : 'Offline map with sample data', h('button.btn.btn-plain.pressable', {
@@ -132,4 +169,14 @@ export function mountSettings(app: App, hud: HTMLElement) {
     );
     body.scrollTop = top;
   }
+}
+
+function fallbackCopy(text: string, done: () => void) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); done(); } catch { /* ignore */ }
+  ta.remove();
 }

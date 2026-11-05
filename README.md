@@ -29,10 +29,12 @@ Edit **`public/config.js`** (copied to `dist/config.js`; you can change it on th
 | Key | Where | Used for | If it's missing |
 |---|---|---|---|
 | `yandexApiKey` (required) | Yandex Developer Dashboard → *JavaScript API and HTTP Geocoder* | map; also the HTTP Geocoder | — |
-| `yandexSuggestKey` | *Geosuggest API* (free tier) | search-as-you-type | falls back to Places search, then to the Geocoder |
-| `yandexSearchKey` | *Places API* (free tier, 500 requests/day) | businesses, categories (cafés, parking…) | addresses, streets and cities still work via the Geocoder; category search asks for the key |
+| `yandexSuggestKey` | *Geosuggest API* (free tier) | search-as-you-type | falls back to Places search, then to the Yandex Geocoder merged with OpenStreetMap (Photon) |
+| `yandexSearchKey` | *Places API* (free tier, 500 requests/day) | businesses, categories (cafés, parking…) | OpenStreetMap: Photon for search, Overpass for nearby categories |
 | `yandexRouterKey` | only if routing isn't enabled on the JS key | driving routes | falls back to OpenStreetMap routing (public OSRM server) |
-| `openChargeMapKey` | openchargemap.org → My profile → API keys (free) | charger power and connector data | chargers come from Yandex Places, if that key exists |
+| `openChargeMapKey` | openchargemap.org → My profile → API keys (free) | charger power and connector data | chargers come from OpenStreetMap (Overpass, incl. GB/T and power where mapped), then Yandex Places |
+
+**Settings → Map services → Check services** tests every service with the keys in that browser (Yandex map, Geosuggest, Places, routing, Geocoder, traffic; OSRM, Photon, Overpass, Open Charge Map, weather, GPS). It shows what the app is using for search, places, directions and chargers, and *Copy report* puts the results on the clipboard.
 
 ### ⚠️ JS API v3 keys need an HTTP Referer restriction
 Yandex only activates a v3 key once its **HTTP Referer restriction** field is filled in. In the Developer Dashboard, open the key's settings and add every host you'll use, for example:
@@ -59,7 +61,7 @@ Any static host with **HTTPS** works; geolocation requires it (Cloudflare Pages,
 ## Tesla browser notes
 - **GPS:** `navigator.geolocation` works in the Tesla browser, but several firmware versions have been reported to freeze the position stream. `LocationService` derives speed and heading when they're missing, holds the heading while stopped, and runs a watchdog that restarts the watch after 12 s of silence.
 - **Voice:** Tesla's Linux Chromium may not have any speech voices. Prompts then fall back to a soft chime, and the banner carries the details.
-- **Performance:** Settings → Glass defaults to *Auto*: Liquid on capable Chromium, Solid on low-core Tesla browsers or when frame pacing measures under 40 fps. While driving, Auto also watches the frame rate and steps down (Liquid → Frosted → Solid) if the map stutters for 6 s, with a short notice.
+- **Performance:** Settings → Glass defaults to *Auto*: Liquid on capable Chromium, Solid on low-core Tesla browsers, Frosted (no lensing) when frame pacing measures under 40 fps a few seconds after start. While driving, Auto also watches the frame rate and steps down (Liquid → Frosted → Solid) if the map stutters for 6 s, with a short notice.
 - **Layout:** cards sit on the driver side (left by default, switchable in Settings), touch targets are ≥ 56 px, and the Tesla browser gets the *Large* text size by default. There's no hover-only UI.
 - **Fullscreen:** the community `youtube.com/redirect?q=<your-url>` trick opens a site fullscreen, but Tesla only allows fullscreen while parked. The app is designed for the normal windowed browser.
 - **Compatibility:** syntax is down-levelled to Chrome 79. CSS uses flexbox `gap` (Chrome 84+), which every reasonably recent Tesla firmware supports.
@@ -99,6 +101,8 @@ src/
     maneuvers.ts     builds turn instructions from route geometry (see below)
     ev.ts            vehicle presets, energy model, charging-stop planner
     chargers.ts      Open Charge Map along-route search, Yandex fallback
+    osm.ts           OpenStreetMap fallbacks: Photon search, Overpass categories and chargers
+    diagnostics.ts   Settings → Map services: live check of every service + copyable report
     weather.ts       Open-Meteo weather at origin/destination + elevation profile
     location.ts      GPS with Tesla workarounds + route simulator
     voice.ts         speech synthesis with chime fallback

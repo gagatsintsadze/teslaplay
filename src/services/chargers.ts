@@ -1,6 +1,7 @@
 import { distance, encodePolyline, projectOnRoute, sampleAlong, simplify } from '../core/geo';
 import type { LngLat, Place, RouteResult } from '../types';
 import { CATEGORIES } from '../ui/icons';
+import type { OsmPlaces } from './osm';
 import type { SearchService } from './search';
 
 export interface ChargerService {
@@ -16,11 +17,16 @@ const CONNECTORS: Record<number, string> = {
 const DOWN = new Set([100, 150, 200]); // OCM status: not operational / planned / removed
 
 /**
- * EV chargers: Open Charge Map (open data, real power + connector info) when a key is set,
- * otherwise Yandex business search sampled along the route.
+ * EV chargers, best source first:
+ *  1. Open Charge Map (power, connectors, status) — when a key is set
+ *  2. OpenStreetMap via Overpass (power and sockets where mapped, incl. GB/T) — no key
+ *  3. Yandex business search sampled along the route — needs a Places key
  */
 export class LiveChargers implements ChargerService {
-  constructor(private ocmKey: string, private search: SearchService) {}
+  /** Source that answered last (for Settings → Map services). */
+  lastSource = '';
+
+  constructor(private ocmKey: string, private search: SearchService, private osm: OsmPlaces) {}
 
   async alongRoute(route: RouteResult): Promise<Place[]> {
     if (this.ocmKey) {
@@ -29,11 +35,18 @@ export class LiveChargers implements ChargerService {
         let line = simplify(route.coords, 400);
         if (line.length > 150) line = simplify(route.coords, 1500);
         const res = await this.ocm({ polyline: encodePolyline(line), distance: '4', maxresults: '250', minpowerkw: '20' });
-        if (res.length) return res;
+        if (res.length) { this.lastSource = 'Open Charge Map'; return res; }
       } catch (e) {
-        console.warn('[chargers] OCM failed, trying Yandex', e);
+        console.warn('[chargers] OCM failed, trying OpenStreetMap', e);
       }
     }
+    try {
+      const res = (await this.osm.chargersAlong(route)).filter((p) => p.charger!.operational !== false);
+      if (res.length) { this.lastSource = 'OpenStreetMap'; return res; }
+    } catch (e) {
+      console.warn('[chargers] Overpass failed, trying Yandex', e);
+    }
+    this.lastSource = 'Yandex Places';
     return this.yandexAlong(route);
   }
 
@@ -41,12 +54,19 @@ export class LiveChargers implements ChargerService {
     if (this.ocmKey) {
       try {
         const res = await this.ocm({ latitude: String(center[1]), longitude: String(center[0]), distance: '25', maxresults: '60' });
-        if (res.length) return res.map((p) => ({ ...p, distance: distance(center, p.coord!) })).sort((a, b) => a.distance! - b.distance!);
+        if (res.length) { this.lastSource = 'Open Charge Map'; return res.map((p) => ({ ...p, distance: distance(center, p.coord!) })).sort((a, b) => a.distance! - b.distance!); }
       } catch (e) {
         console.warn('[chargers] OCM failed', e);
       }
     }
+    try {
+      const res = await this.osm.nearby('chargers', center, 8000);
+      if (res.length) { this.lastSource = 'OpenStreetMap'; return res; }
+    } catch (e) {
+      console.warn('[chargers] Overpass failed', e);
+    }
     const q = CATEGORIES[0].query;
+    this.lastSource = 'Yandex Places';
     return this.search.category('chargers', q, center).then((list) => list.map(asCharger));
   }
 
