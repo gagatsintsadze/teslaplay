@@ -102,7 +102,7 @@ export class App {
     const center = this.cfg.demo ? DEMO_START : last || TBILISI;
     this.bootCenter = center;
     this.applyTheme();
-    await this.engine.init(mapEl, { center, zoom: this.cfg.demo ? 17.2 : 15, theme: this.state.theme });
+    await this.engine.init(mapEl, { center, zoom: this.cfg.demo ? 17.2 : 15, theme: this.state.theme, roadStyle: this.state.settings.roadStyle });
     this.mapReady = true;
 
     this.follow = new FollowController(this.engine, this.puck, {
@@ -216,6 +216,7 @@ export class App {
     this.applySettings(settings, false);
     if ('themeMode' in patch) this.applyTheme();
     if ('traffic' in patch) this.setTraffic(!!patch.traffic);
+    if ('roadStyle' in patch) this.engine.setRoadStyle?.(settings.roadStyle);
     if ('view3D' in patch) {
       this.follow.tilt3D = !!patch.view3D;
       if (!this.state.navigating) this.engine.setView({ tilt: this.follow.exploreTilt, duration: 500 });

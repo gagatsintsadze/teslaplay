@@ -5,7 +5,7 @@ navigation falls short (Georgia, much of Central Asia). It uses Yandex Maps JS A
 search, traffic and routing, and adds EV trip planning, turn-by-turn guidance and an interface in Apple's Liquid Glass design language,
 sized for a car screen.
 
-- **Zero runtime dependencies.** TypeScript compiled to one ~132 KB script (≈48 KB gzipped) plus ~42 KB of CSS. It stays light on older Tesla hardware (MCU2).
+- **Zero runtime dependencies.** TypeScript compiled to one ~179 KB script (≈60 KB gzipped) plus ~42 KB of CSS. It stays light on older Tesla hardware (MCU2).
 - **Demo mode** runs without any API key or network access, so you can work on the UI without spending Yandex quota.
 
 ---
@@ -35,6 +35,8 @@ Edit **`public/config.js`** (copied to `dist/config.js`; you can change it on th
 | `yandexGeocoderKey` | *Geocoder API* | addresses, reverse geocoding for street names (`geocode-maps.yandex.ru/v1`) | the JS API key on the legacy `1.x` endpoint |
 | `yandexMatrixKey` | *Distance Matrix API* | real drive times on nearby results, ranked by time | results ranked by straight-line distance |
 | `openChargeMapKey` | openchargemap.org → My profile → API keys (free) | charger power and connector data | chargers come from OpenStreetMap (Overpass, incl. GB/T and power where mapped), then Yandex Places |
+
+On the Yandex map, **Settings → Appearance → Road style** switches between *Drive* (dark asphalt roads with white lane markings at street zoom, wider roads, muted land) and Yandex's stock scheme.
 
 **Settings → Map services → Check services** tests every service with the keys in that browser (Yandex map, Geosuggest, Places, routing, Geocoder, traffic; OSRM, Photon, Overpass, Open Charge Map, weather, GPS). It shows what the app is using for search, places, directions and chargers, and *Copy report* puts the results on the clipboard.
 
@@ -90,7 +92,8 @@ src/
   mapsync.ts         keeps routes / pins / insets on the map in sync with state
   map/
     engine.ts        MapEngine interface (the only thing the app knows about maps)
-    yandex.ts        Yandex JS API v3 implementation (YMap, markers, features, traffic, listener)
+    yandex.ts        Yandex JS API v3 implementation (YMap, markers, features, traffic, listener, turn arrows, zoom-scaled route line)
+    yandex-style.ts  "Drive" customization of the Yandex vector scheme: asphalt roads, lane markings, wider streets
     osm.ts           OpenStreetMap map (self-hosted MapLibre GL): routes, ghosted buildings on the route, turn arrows
     style.ts         "Drive" map style on OpenFreeMap tiles: real-width asphalt roads with markings, 3D buildings, labels
     demo.ts          offline Web-Mercator engine used by demo mode

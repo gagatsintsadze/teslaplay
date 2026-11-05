@@ -3,6 +3,7 @@ import { toDeg, toRad } from '../core/geo';
 import type { LngLat, LngLatBounds } from '../types';
 import type { MapClick, MapEngine, MarkerSpec, Padding, RouteLine, ViewRequest, ViewState } from './engine';
 import { attachGestureWatcher } from './gestures';
+import { yandexCustomization } from './yandex-style';
 
 declare global {
   interface Window { ymaps3?: any }
@@ -65,6 +66,7 @@ export class YandexEngine implements MapEngine {
   private user: any = null;
   private userEl: HTMLElement | null = null;
   private theme: 'light' | 'dark' = 'dark';
+  private roadStyle: 'drive' | 'classic' = 'drive';
   private gestureCbs: (() => void)[] = [];
   private viewCbs: ((v: ViewState) => void)[] = [];
   private clickCbs: ((e: MapClick) => void)[] = [];
@@ -73,9 +75,10 @@ export class YandexEngine implements MapEngine {
 
   constructor(private cfg: AppConfig) {}
 
-  async init(container: HTMLElement, opts: { center: LngLat; zoom: number; theme: 'light' | 'dark' }) {
+  async init(container: HTMLElement, opts: { center: LngLat; zoom: number; theme: 'light' | 'dark'; roadStyle?: 'drive' | 'classic' }) {
     const y = (this.y = await loadYandex(this.cfg));
     this.theme = opts.theme;
+    this.roadStyle = opts.roadStyle || 'drive';
     const { YMap, YMapDefaultSchemeLayer, YMapDefaultFeaturesLayer, YMapListener } = y;
     this.map = new YMap(container, {
       location: { center: opts.center, zoom: opts.zoom },
@@ -86,7 +89,7 @@ export class YandexEngine implements MapEngine {
       zoomRange: { min: 3, max: 21 },
       showScaleInCopyrights: true,
     });
-    this.scheme = new YMapDefaultSchemeLayer({ theme: opts.theme });
+    this.scheme = new YMapDefaultSchemeLayer({ theme: opts.theme, customization: this.customization() });
     this.map.addChild(this.scheme);
     this.map.addChild(new YMapDefaultFeaturesLayer({}));
     this.map.addChild(new YMapListener({
@@ -105,6 +108,11 @@ export class YandexEngine implements MapEngine {
       this.viewQueued = false;
       const v = this.getView();
       this.viewCbs.forEach((cb) => cb(v));
+      // Re-stroke the route and turn arrow when the zoom has changed their on-screen width enough.
+      if (Math.round(this.routeScale() * 4) !== this.widthBucket) {
+        this.restyleRoutes();
+        this.drawManeuver();
+      }
     });
   }
 
@@ -132,7 +140,19 @@ export class YandexEngine implements MapEngine {
     this.theme = theme;
     if (!this.map) return; // applied at init
     try { this.map.update({ theme }); } catch (e) { console.warn(e); }
-    try { this.scheme.update({ theme }); } catch { /* prop removed in newer builds */ }
+    try { this.scheme.update({ theme, customization: this.customization() }); } catch { /* prop removed in newer builds */ }
+    if (this.lines.length) this.setRoutes(this.lines);
+  }
+
+  setRoadStyle(style: 'drive' | 'classic') {
+    if (style === this.roadStyle) return;
+    this.roadStyle = style;
+    if (!this.scheme) return;
+    try { this.scheme.update({ customization: this.customization() }); } catch (e) { console.warn(e); }
+  }
+
+  private customization() {
+    return this.roadStyle === 'drive' ? yandexCustomization(this.theme) : [];
   }
 
   async setTraffic(visible: boolean): Promise<boolean> {
@@ -198,17 +218,36 @@ export class YandexEngine implements MapEngine {
     } catch (e) { console.warn(e); }
   }
 
-  setRoutes(lines: RouteLine[]) {
-    const { YMapFeature } = this.y;
-    this.routeEntities.forEach((f) => this.map.removeChild(f));
-    this.routeEntities = [];
+  /** Route widths follow the zoom like a painted lane (YMapFeature strokes are in screen pixels). */
+  private widthBucket = 0;
+  private lines: RouteLine[] = [];
+
+  private routeScale() {
+    const z = this.map ? this.map.zoom : 14;
+    return Math.max(1, Math.pow(2, z - 16.4)); // ×1 up to z16.4, doubling per zoom level beyond
+  }
+
+  private routeStyles(): Record<string, RouteStyle> {
     const css = getComputedStyle(document.documentElement);
     const v = (name: string, fb: string) => css.getPropertyValue(name).trim() || fb;
-    const styles: Record<string, RouteStyle> = {
-      alternative: { casing: v('--route-alt-casing', '#3a4250'), fill: v('--route-alt', '#7e8a9c'), casingW: 11, fillW: 7, z: 1000 },
-      traveled: { casing: '#4a5160', fill: '#8a93a3', casingW: 11, fillW: 7, z: 1050 },
-      primary: { casing: v('--route-casing', '#0b4fc4'), fill: v('--route', '#2f8bff'), casingW: 17, fillW: 11, z: 1100 },
+    const k = this.routeScale();
+    return {
+      alternative: { casing: v('--route-alt-casing', '#3a4250'), fill: v('--route-alt', '#7e8a9c'), casingW: 10 * k, fillW: 6.5 * k, z: 1000 },
+      traveled: { casing: '#4a5160', fill: '#8a93a3', casingW: 10 * k, fillW: 6.5 * k, z: 1050 },
+      primary: { casing: v('--route-casing', '#0b4fc4'), fill: v('--route', '#2f8bff'), casingW: 13 * k, fillW: 9 * k, z: 1100 },
     };
+  }
+
+  private routeParts: { f: any; role: string; part: 'c' | 'f' }[] = [];
+
+  setRoutes(lines: RouteLine[]) {
+    const { YMapFeature } = this.y;
+    this.lines = lines;
+    this.routeEntities.forEach((f) => this.map.removeChild(f));
+    this.routeEntities = [];
+    this.routeParts = [];
+    const styles = this.routeStyles();
+    this.widthBucket = Math.round(this.routeScale() * 4);
     for (const line of lines) {
       if (line.coords.length < 2) continue;
       const s = styles[line.role];
@@ -218,6 +257,19 @@ export class YandexEngine implements MapEngine {
       this.map.addChild(casing);
       this.map.addChild(fill);
       this.routeEntities.push(casing, fill);
+      this.routeParts.push({ f: casing, role: line.role, part: 'c' }, { f: fill, role: line.role, part: 'f' });
+    }
+  }
+
+  /** Cheap re-stroke on zoom: update styles in place instead of rebuilding long geometries. */
+  private restyleRoutes() {
+    const styles = this.routeStyles();
+    this.widthBucket = Math.round(this.routeScale() * 4);
+    for (const { f, role, part } of this.routeParts) {
+      const s = styles[role];
+      try {
+        f.update({ style: { stroke: [{ color: part === 'c' ? s.casing : s.fill, width: part === 'c' ? s.casingW : s.fillW }], zIndex: part === 'c' ? s.z : s.z + 1, simplificationRate: 0 } });
+      } catch (e) { console.warn(e); }
     }
   }
 
@@ -256,6 +308,51 @@ export class YandexEngine implements MapEngine {
     } else {
       this.user.update({ coordinates: coord });
     }
+  }
+
+  // ── turn arrow ──
+  private maneuverPath: LngLat[] | null = null;
+  private maneuverEntities: any[] = [];
+
+  setNavOverlay(o: { ahead: LngLat[] | null; maneuver: LngLat[] | null }) {
+    // Yandex draws our features above its 3D buildings, so the route is never hidden; only the arrow is needed.
+    this.maneuverPath = o.maneuver && o.maneuver.length > 1 ? o.maneuver : null;
+    this.drawManeuver();
+  }
+
+  private drawManeuver() {
+    if (!this.map) return;
+    this.maneuverEntities.forEach((f) => this.map.removeChild(f));
+    this.maneuverEntities = [];
+    const m = this.maneuverPath;
+    if (!m) return;
+    const { YMapFeature } = this.y;
+    const k = this.routeScale();
+    const a = m[m.length - 2];
+    const b = m[m.length - 1];
+    const kx = 111320 * Math.cos((b[1] * Math.PI) / 180);
+    const ky = 110540;
+    const len = Math.hypot((b[0] - a[0]) * kx, (b[1] - a[1]) * ky) || 1;
+    const ux = ((b[0] - a[0]) * kx) / len;
+    const uy = ((b[1] - a[1]) * ky) / len;
+    const at = (along: number, side: number): LngLat => [b[0] + (ux * along - uy * side) / kx, b[1] + (uy * along + ux * side) / ky];
+    const head = [at(-0.5, 6), at(10, 0), at(-0.5, -6), at(-0.5, 6)];
+    const shaftCasing = new YMapFeature({
+      id: 'mv-shaft-c', geometry: { type: 'LineString', coordinates: m },
+      style: { stroke: [{ color: '#0b4fc4', width: 11 * k }], zIndex: 1299, simplificationRate: 0 },
+    });
+    const shaft = new YMapFeature({
+      id: 'mv-shaft', geometry: { type: 'LineString', coordinates: m },
+      style: { stroke: [{ color: '#ffffff', width: 7 * k }], zIndex: 1300, simplificationRate: 0 },
+    });
+    const arrow = new YMapFeature({
+      id: 'mv-head', geometry: { type: 'Polygon', coordinates: [head] },
+      style: { fill: '#ffffff', stroke: [{ color: '#0b4fc4', width: 2 * Math.min(2, k) }], zIndex: 1301 },
+    });
+    this.map.addChild(shaftCasing);
+    this.map.addChild(shaft);
+    this.map.addChild(arrow);
+    this.maneuverEntities.push(shaftCasing, shaft, arrow);
   }
 
   onUserGesture(cb: () => void) { this.gestureCbs.push(cb); }

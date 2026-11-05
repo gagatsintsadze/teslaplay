@@ -140,5 +140,7 @@ export interface Settings {
   textSize: 'standard' | 'large' | 'larger';
   traffic: boolean;
   view3D: boolean;
+  /** Drive: high-contrast asphalt roads and lane markings on the Yandex map. Classic: Yandex's stock scheme. */
+  roadStyle: 'drive' | 'classic';
   devTools: boolean;
 }

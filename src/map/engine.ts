@@ -36,8 +36,10 @@ export interface MapEngine {
   readonly supportsTraffic: boolean;
   /** Steepest camera pitch the engine renders well, degrees (the driving view uses it). */
   readonly maxTilt: number;
-  init(container: HTMLElement, opts: { center: LngLat; zoom: number; theme: 'light' | 'dark' }): Promise<void>;
+  init(container: HTMLElement, opts: { center: LngLat; zoom: number; theme: 'light' | 'dark'; roadStyle?: 'drive' | 'classic' }): Promise<void>;
   setTheme(theme: 'light' | 'dark'): void;
+  /** Yandex only: switch between the Drive road styling and Yandex's stock scheme. */
+  setRoadStyle?(style: 'drive' | 'classic'): void;
   /** Resolves to whether traffic could be shown. */
   setTraffic(visible: boolean): Promise<boolean>;
   setView(req: ViewRequest): void;

@@ -120,6 +120,7 @@ export function mountSettings(app: App, hud: HTMLElement) {
     mount(body,
       group('Appearance',
         row('Map appearance', st.themeMode === 'auto' ? 'Follows sunrise and sunset' : null, seg('theme', st.themeMode, [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']], (m) => set({ themeMode: m }))),
+        ...(app.engine.kind === 'yandex' ? [row('Road style', 'Drive: asphalt roads with lane markings', seg('roads', st.roadStyle, [['drive', 'Drive'], ['classic', 'Yandex']], (r) => set({ roadStyle: r })))] : []),
         row('Text size', null, seg('text', st.textSize, [['standard', 'Standard'], ['large', 'Large'], ['larger', 'Larger']], (t) => set({ textSize: t }))),
         row('Driver side', 'Where cards and guidance appear', seg('side', st.driverSide, [['left', 'Left'], ['right', 'Right']], (d) => set({ driverSide: d }))),
         row('Glass', glassNote(s.material, st.glass), seg('glass', st.glass, [['auto', 'Auto'], ['liquid', 'Liquid'], ['frosted', 'Frosted'], ['solid', 'Solid']], (g) => set({ glass: g }))),
