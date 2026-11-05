@@ -1,63 +1,65 @@
-/* ─────────────── Right-side control column ─────────────── */
+/* ─────────────── Right-side control column ───────────────
+   Floating Liquid Glass capsules, grouped by function: settings alone,
+   map layers [traffic · 3D], compass, zoom [+ −], locate. Icons only. */
 .controls {
   position: absolute; top: var(--edge); right: var(--edge); bottom: var(--edge);
   display: flex; flex-direction: column; align-items: flex-end; gap: .75rem;
   pointer-events: none !important;
 }
 [data-side="right"] .controls { right: auto; left: var(--edge); align-items: flex-start; }
-.controls > * { pointer-events: auto; }
+.controls > * { pointer-events: auto; transition: opacity .4s var(--ease), translate .5s var(--ease), scale .5s var(--spring-soft), transform .55s var(--spring), box-shadow .3s var(--ease-out); }
+.controls > .lg-pressed { transition: opacity .4s var(--ease), translate .5s var(--ease), scale .5s var(--spring-soft), transform .18s var(--ease-out), box-shadow .18s; }
 .controls .spacer { flex: 1; pointer-events: none; }
 
-.status { display: flex; align-items: center; height: 3rem; padding: 0 1rem; gap: .875rem; border-radius: var(--r-pill); font-weight: 600; font-size: 1rem; }
+.status { display: flex; align-items: center; height: 3rem; padding: 0 1.125rem; gap: .875rem; border-radius: var(--r-pill); font-weight: 600; font-size: 1rem; }
 .status .sep { width: 1px; height: 1.25rem; background: var(--hairline-strong); }
 .status .wx { display: flex; align-items: center; gap: .4rem; }
 
-.ctl-group { display: flex; flex-direction: column; border-radius: 1.125rem; overflow: hidden; }
-.ctl { width: var(--tap); height: var(--tap); display: grid; place-items: center; color: var(--text); position: relative; transition: background-color var(--t-fast) linear, color var(--t-fast) linear; }
-.ctl + .ctl::before { content: ""; position: absolute; top: 0; left: .75rem; right: .75rem; height: 1px; background: var(--hairline); }
-.ctl:active { background: var(--fill-2); }
+/* Capsule groups */
+.ctl-group { --flex: 1.04; display: flex; flex-direction: column; border-radius: var(--r-pill); }
+.ctl { width: var(--tap); height: var(--tap); display: grid; place-items: center; color: var(--text); position: relative; border-radius: var(--r-pill); transition: color var(--t-fast) linear; }
+.ctl-group .ctl + .ctl { margin-top: -.25rem; }
+.ctl::after { content: ""; position: absolute; inset: .3125rem; border-radius: inherit; background: var(--fill); opacity: 0; transform: scale(.7); transition: opacity .25s linear, transform .45s var(--spring); }
+.ctl:active::after { opacity: 1; transform: none; transition-duration: .1s; }
+.ctl > * { position: relative; z-index: 1; }
 .ctl.on { color: var(--accent); }
-.ctl.label { font-weight: 800; font-size: .9375rem; letter-spacing: -.01em; }
-.ctl-single { width: var(--tap); height: var(--tap); border-radius: 1.125rem; display: grid; place-items: center; }
-.ctl-single.on { color: var(--accent); }
+.ctl-single { width: var(--tap); height: var(--tap); border-radius: 50%; display: grid; place-items: center; color: var(--text); }
+.ctl-single.on, .ctl-single.following { color: var(--accent); }
 
 /* Compass */
 .compass { position: relative; width: 2.125rem; height: 2.125rem; border-radius: 50%; border: 1.5px solid var(--text-3); transition: transform var(--t-fast) linear; }
 .compass::before { content: ""; position: absolute; left: 50%; top: 2px; transform: translateX(-50%); border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 11px solid var(--red); }
 .compass::after { content: ""; position: absolute; left: 50%; bottom: 2px; transform: translateX(-50%); border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 11px solid var(--text-3); }
 .compass-n { position: absolute; left: 0; right: 0; top: -1.15rem; text-align: center; font-size: .625rem; font-weight: 800; color: var(--text-2); }
+.compass-btn.hidden { opacity: 0; scale: .6; pointer-events: none; }
 
-/* Locate button */
-.locate.following { color: var(--accent); }
 .locate.course svg { color: var(--accent); }
 
-/* Recenter pill */
+/* Recenter capsule — centred with auto margins so transforms stay free for flex/materialize */
 .recenter {
-  position: absolute; left: 50%; bottom: calc(var(--edge) + .5rem);
-  transform: translateX(-50%);
+  position: absolute; left: 0; right: 0; bottom: calc(var(--edge) + .5rem);
+  width: max-content; margin: 0 auto;
   display: flex; align-items: center; gap: .5rem;
   height: 3.25rem; padding: 0 1.375rem 0 1.125rem; border-radius: var(--r-pill);
   color: var(--accent); font-weight: 700; font-size: 1.0625rem;
-  transition: opacity var(--t-med) var(--ease), transform var(--t-med) var(--ease);
+  transition: opacity var(--t-med) var(--ease), transform .5s var(--spring-soft);
 }
-.recenter.hidden { opacity: 0; transform: translate(-50%, 1rem); pointer-events: none; }
+.recenter.hidden { opacity: 0; transform: translateY(1rem) scale(.85); pointer-events: none; transition: opacity var(--t-fast) linear, transform var(--t-med) var(--ease-in); }
 
-/* Toasts */
-.toasts { position: absolute; top: var(--edge); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: .5rem; pointer-events: none !important; z-index: 40; }
-.toast { display: flex; align-items: center; gap: .625rem; min-height: 3rem; max-width: 34rem; padding: .625rem 1.125rem; border-radius: var(--r-pill); font-weight: 600; font-size: .9375rem; animation: toast-in var(--t-med) var(--spring) both; pointer-events: auto; }
-.toast.out { animation: toast-out var(--t-med) var(--ease) both; }
+/* Toasts — small glass capsules that materialize from the top edge */
+.toasts { position: absolute; top: var(--edge); left: 0; right: 0; margin: 0 auto; width: max-content; max-width: min(34rem, calc(100% - 2 * var(--edge))); display: flex; flex-direction: column; align-items: center; gap: .5rem; pointer-events: none !important; z-index: 40; }
+.toast { display: flex; align-items: center; gap: .625rem; min-height: 3rem; max-width: 100%; padding: .625rem 1.25rem .625rem 1rem; border-radius: var(--r-pill); font-weight: 600; font-size: .9375rem; transform-origin: top center; animation: lg-in .56s var(--spring-soft) both; pointer-events: auto; }
+.toast.out { animation: lg-out var(--t-med) var(--ease-in) both; }
 .toast .ic-warn { color: var(--orange); }
 .toast .ic-ok { color: var(--green); }
 .toast .ic-err { color: var(--red); }
-@keyframes toast-in { from { opacity: 0; transform: translateY(-.75rem) scale(.96); } }
-@keyframes toast-out { to { opacity: 0; transform: translateY(-.5rem) scale(.98); } }
 
-/* ─────────────── Map markers ─────────────── */
+/* ─────────────── Map markers (content layer: no glass) ─────────────── */
 .mk { position: absolute; width: 0; height: 0; }
 .mk > * { position: absolute; }
 
 .pin { left: 0; top: 0; transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center; pointer-events: auto; cursor: pointer; animation: pin-drop var(--t-slow) var(--spring) both; }
-.pin-head { width: 2.5rem; height: 2.5rem; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--red); border: 2.5px solid #fff; box-shadow: 0 6px 16px rgba(0, 0, 0, .35); }
+.pin-head { width: 2.5rem; height: 2.5rem; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--red); border: 2.5px solid #fff; box-shadow: 0 6px 16px rgba(0, 0, 0, .35); transition: transform .45s var(--spring); }
 .pin-tail { width: 0; height: 0; margin-top: -2px; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 9px solid #fff; filter: drop-shadow(0 3px 2px rgba(0, 0, 0, .2)); }
 .pin.lg .pin-head { width: 3.25rem; height: 3.25rem; }
 .pin.sel .pin-head { transform: scale(1.18); }
@@ -87,3 +89,7 @@
 .puck.nav .puck-halo { animation: none; opacity: 0; }
 .puck.stale .puck-core { background: var(--gray); }
 @keyframes halo { 0% { transform: scale(.35); opacity: .9; } 100% { transform: scale(1); opacity: 0; } }
+
+/* While driving, map chrome recedes after a few idle seconds; a tap brings it back */
+.hud.idle[data-mode="nav"] .controls > :not(.speed):not(.spacer) { opacity: 0; translate: 1.5rem 0; pointer-events: none; }
+.hud.idle[data-mode="nav"][data-side="right"] .controls > :not(.speed):not(.spacer) { translate: -1.5rem 0; }

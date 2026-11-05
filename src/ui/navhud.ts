@@ -5,6 +5,7 @@ import { shallowEqualArray } from '../core/store';
 import type { NavSnapshot } from '../nav/session';
 import { maneuverGlyph, maneuverVerb } from './glyph';
 import { icon } from './icons';
+import { segmented } from './segmented';
 
 /** Turn-by-turn HUD: maneuver banner (top), trip summary (bottom), status pills, arrival card. */
 export function mountNavHud(app: App, hud: HTMLElement) {
@@ -22,7 +23,7 @@ export function mountNavHud(app: App, hud: HTMLElement) {
   const thenGlyph = h('span');
   const thenText = h('span');
   const thenRow = h('div.mv-then', null, h('span', null, 'Then'), thenGlyph, thenText);
-  const banner = h('section.maneuver.glass-ink', { 'aria-live': 'assertive' }, main, thenRow);
+  const banner = h('section.maneuver.glass.glass-lg.glass-dark', { 'aria-live': 'assertive' }, main, thenRow);
 
   // ── trip summary ──
   const arrV = h('div.trip-v.arr.num');
@@ -44,7 +45,7 @@ export function mountNavHud(app: App, hud: HTMLElement) {
   const muteTile = h('button.tile.pressable', { onclick: () => app.toggleMute() });
   const tilt = h('button.tile.pressable', { onclick: () => app.updateSettings({ view3D: !store.get().settings.view3D }) });
   const simRow = h('div.sim-row');
-  const extra = h('div.trip-extra', null,
+  const extra = h('div.trip-extra', null, h('div.trip-inner', null,
     socRow, stopRow,
     h('div.trip-grid', null,
       h('button.tile.pressable', { onclick: () => { app.overview(); store.set({ tripOpen: false }); } }, icon('overview', 22), 'Overview'),
@@ -52,8 +53,8 @@ export function mountNavHud(app: App, hud: HTMLElement) {
     ),
     h('button.btn.btn-danger.btn-block.trip-end.pressable', { onclick: () => app.endNavigation() }, 'End Route'),
     simRow,
-  );
-  const trip = h('section.trip.glass', null, bar, extra);
+  ));
+  const trip = h('section.trip.glass.glass-lg', null, bar, extra);
   bar.addEventListener('click', () => store.set({ tripOpen: !store.get().tripOpen }));
 
   const pill = h('div.nav-pill.glass', null, h('span.spinner'), 'Rerouting…');
@@ -132,8 +133,8 @@ export function mountNavHud(app: App, hud: HTMLElement) {
       stopRow.style.display = '';
     } else stopRow.style.display = 'none';
     if (s.simulating) {
-      mount(simRow, h('span', null, 'Simulated drive'), h('div.segmented', { style: { minWidth: '12rem' } },
-        ...[1, 2, 4, 8].map((x) => h('button', { class: { on: s.simSpeed === x }, onclick: () => app.setSimSpeed(x) }, `${x}×`))));
+      mount(simRow, h('span', null, 'Simulated drive'),
+        segmented('sim-speed', s.simSpeed, [1, 2, 4, 8].map((x) => [x, `${x}×`] as [number, string]), (x) => app.setSimSpeed(x), { style: { minWidth: '12rem' } }));
       simRow.style.display = '';
     } else simRow.style.display = 'none';
   }, { equals: eq });
@@ -152,7 +153,7 @@ export function mountNavHud(app: App, hud: HTMLElement) {
     const s = store.get();
     const soc = s.nav && s.nav.socNow !== null ? s.nav.socNow : null;
     trip.remove();
-    arrival = h('section.arrival.glass', null,
+    arrival = h('section.arrival.glass.glass-lg', null,
       h('div.arrival-flag', null, icon('flag', 26)),
       h('div.arrival-title', null, 'Arrived'),
       h('div.arrival-sub', null, `${s.destination ? s.destination.name : 'Destination'} · ${formatClock(Date.now())}${soc !== null ? ` · ${Math.round(Math.max(0, soc))}% battery` : ''}`),

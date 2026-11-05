@@ -3,8 +3,8 @@ import { isTesla, likelyLowEnd, measureSluggish } from './core/env';
 import { setUnits } from './core/format';
 import { boundsOf, distance, padBounds, slice } from './core/geo';
 import { storage } from './core/storage';
-import { Store } from './core/store';
-import { isDaylight } from './core/sun';
+import { shallowEqualArray, Store } from './core/store';
+import { isDaylight, sunPosition } from './core/sun';
 import { DemoEngine } from './map/demo';
 import type { MapClick, MapEngine, Padding } from './map/engine';
 import { createPuck } from './map/markers';
@@ -24,6 +24,7 @@ import { Voice } from './services/voice';
 import { WeatherService } from './services/weather';
 import { type AppState, initialState } from './state';
 import type { Fix, LngLat, Place, RouteResult, Settings } from './types';
+import { FrameGuard, lensSupported, type Material } from './ui/glass';
 import type { Category } from './ui/icons';
 
 const TBILISI: LngLat = [44.7934, 41.7151];
@@ -54,6 +55,9 @@ export class App {
   private measuredSlow = false;
   private mapReady = false;
   private bootCenter: LngLat = TBILISI;
+  /** How many steps Auto glass has backed off (Liquid → Frosted → Solid) after choppy frames. */
+  private materialStep = 0;
+  private frameGuard = new FrameGuard(() => this.stepDownMaterial());
   layoutListeners: (() => void)[] = [];
 
   constructor(public cfg: AppConfig) {
@@ -122,10 +126,38 @@ export class App {
       this.measured = true;
       measureSluggish().then((slow) => {
         this.measuredSlow = slow;
-        if (slow && this.state.settings.perf === 'auto') this.store.set({ lite: true });
+        if (slow && this.state.settings.glass === 'auto') this.applySettings(this.state.settings, false);
       });
     }
     window.addEventListener('resize', () => this.layoutListeners.forEach((l) => l()));
+
+    // Watch frame pacing while driving; Auto glass steps down rather than let guidance stutter.
+    this.store.select((s) => [s.navigating, s.material, s.settings.glass], () => {
+      const s = this.state;
+      if (s.navigating && s.settings.glass === 'auto' && s.material !== 'solid') this.frameGuard.start();
+      else this.frameGuard.stop();
+    }, { equals: shallowEqualArray as any });
+  }
+
+  /** Direction the glass is lit from, in screen degrees: the sun relative to the map's heading by day. */
+  lightAngle(): number {
+    const sun = sunPosition(new Date(), this.here());
+    return sun.elevation > -2 ? sun.azimuth - this.state.azimuth : 320;
+  }
+
+  private resolveMaterial(s: Settings, slow: boolean): Material {
+    const order: Material[] = ['liquid', 'frosted', 'solid'];
+    let m: Material = s.glass === 'auto' ? (slow ? 'solid' : lensSupported ? 'liquid' : 'frosted') : s.glass;
+    if (m === 'liquid' && !lensSupported) m = 'frosted';
+    if (s.glass === 'auto') m = order[Math.min(2, order.indexOf(m) + this.materialStep)];
+    return m;
+  }
+
+  private stepDownMaterial() {
+    if (this.state.material === 'solid' || this.state.settings.glass !== 'auto') return;
+    this.materialStep++;
+    this.applySettings(this.state.settings, false);
+    this.toast(this.state.material === 'frosted' ? 'Glass lensing paused to keep the map smooth' : 'Using solid panels to keep the map smooth', 'info', 4500);
   }
 
   /** Best current position: GPS fix, else the map centre, else the boot centre. */
@@ -155,6 +187,7 @@ export class App {
   // ───────────────────────── settings / appearance ─────────────────────────
   updateSettings(patch: Partial<Settings>) {
     const settings = { ...this.state.settings, ...patch };
+    if ('glass' in patch) this.materialStep = 0;
     storage.set('settings', settings);
     this.store.set({ settings });
     this.applySettings(settings, false);
@@ -174,8 +207,10 @@ export class App {
     const scale = s.textSize === 'larger' ? 1.25 : s.textSize === 'large' ? 1.12 : 1;
     root.style.setProperty('--ui-scale', String(scale));
     setUnits(s.units);
-    const lite = s.perf === 'on' ? true : s.perf === 'off' ? false : likelyLowEnd || this.measuredSlow;
-    if (lite !== this.state.lite || initial) this.store.set({ lite });
+    const slow = likelyLowEnd || this.measuredSlow;
+    const lite = s.glass === 'solid' || (s.glass === 'auto' && slow);
+    const material = this.resolveMaterial(s, slow);
+    if (lite !== this.state.lite || material !== this.state.material || initial) this.store.set({ lite, material });
     this.voice.muted = this.state.muted || !s.voice;
     this.layoutListeners.forEach((l) => l());
   }
@@ -188,7 +223,8 @@ export class App {
     if (meta) meta.setAttribute('content', theme === 'dark' ? '#0b0d12' : '#f2f3f5');
     if (theme !== this.state.theme) {
       this.store.set({ theme });
-      this.engine.setTheme(theme);
+      // Before init the engine is created with `theme` directly.
+      if (this.mapReady) this.engine.setTheme(theme);
       // re-tint route lines for the new palette
       this.layoutListeners.forEach((l) => l());
     }

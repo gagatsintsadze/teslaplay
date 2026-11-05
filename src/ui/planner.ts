@@ -13,7 +13,7 @@ export function plannerView(app: App): Node[] {
   const dest = s.destination!;
   const nodes: Node[] = [];
 
-  nodes.push(h('div.view-head', { style: { paddingTop: 'var(--pad)' } },
+  nodes.push(h('div.view-head', null,
     h('div.grow', null, h('div.view-title', null, 'Directions'), h('div.view-sub', null, vehicleById(s.settings.vehicleId).name)),
     closeButton(() => app.store.set({ panel: 'place', place: dest, routes: [], plan: null, chargers: [] }), 'Close directions'),
   ));
@@ -81,7 +81,22 @@ function evCard(app: App) {
   const s = app.state;
   const plan = s.plan;
   const busy = s.planBusy || !plan;
-  const step = (d: number) => () => app.setBattery(s.battery + d);
+  const tone = (v: number) => (v < 10 ? 'crit' : v < 20 ? 'low' : '');
+  // Slider: label follows the finger; the trip is re-planned when it's released.
+  const socLabel = h('span.ev-soc.num', null, pct(s.battery));
+  const slider = h('input.slider.ev-slider', { type: 'range', min: '5', max: '100', step: '1', value: String(Math.round(s.battery)), 'aria-label': 'Battery now' }) as HTMLInputElement;
+  const paint = () => {
+    const v = +slider.value;
+    slider.style.setProperty('--val', `${((v - 5) / 95) * 100}%`);
+    slider.classList.remove('low', 'crit');
+    const t = tone(v);
+    if (t) slider.classList.add(t);
+    socLabel.textContent = pct(v);
+    socLabel.style.color = t === 'crit' ? 'var(--red)' : t === 'low' ? 'var(--orange)' : '';
+  };
+  slider.addEventListener('input', paint);
+  slider.addEventListener('change', () => app.setBattery(+slider.value));
+  paint();
   const reserve = s.settings.reserveSoc;
 
   const stat = (label: string, value: Node | string, unit?: string) =>
@@ -97,12 +112,9 @@ function evCard(app: App) {
   return h('div.ev', null,
     h('div.ev-head', null,
       h('div.ev-title', null, icon('bolt', 18), 'Battery now'),
-      h('div.stepper', null,
-        h('button.pressable', { 'aria-label': 'Less', onclick: step(-5) }, icon('minus', 18)),
-        h('span.val.num', null, pct(s.battery)),
-        h('button.pressable', { 'aria-label': 'More', onclick: step(5) }, icon('plus', 18)),
-      ),
+      socLabel,
     ),
+    slider,
     h('div.ev-stats', null, ...(busy
       ? [skel(), skel(), skel()]
       : [
@@ -183,6 +195,6 @@ export function plannerFooter(app: App): Node[] {
   const showSim = s.settings.devTools || s.demo;
   return [h('div.go-row', null,
     h('button.btn.btn-go.pressable', { disabled: !ready || s.planBusy, onclick: () => app.startNavigation() }, s.planBusy ? 'Planning…' : 'Go'),
-    showSim && !s.demo ? h('button.btn.btn-plain.pressable', { disabled: !ready, onclick: () => app.startNavigation(true), style: { minHeight: 'var(--tap-lg)', borderRadius: 'var(--r-lg)' } }, icon('play', 18), 'Simulate') : null,
+    showSim && !s.demo ? h('button.btn.btn-plain.pressable', { disabled: !ready, onclick: () => app.startNavigation(true), style: { minHeight: 'var(--tap-lg)' } }, icon('play', 18), 'Simulate') : null,
   )];
 }

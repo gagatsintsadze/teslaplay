@@ -1,65 +1,69 @@
 /* ─────────────── Turn-by-turn HUD ─────────────── */
+/* Maneuver banner: large dark glass — guidance must read the same over any map */
 .maneuver {
   position: absolute; top: var(--edge); left: var(--edge);
   width: var(--panel-w);
-  border-radius: var(--r-xl);
+  border-radius: var(--r-outer);
   overflow: hidden;
-  animation: slide-down var(--t-slow) var(--ease) both;
+  transform-origin: top left;
+  animation: lg-in .6s var(--spring-soft) both;
 }
-[data-side="right"] .maneuver { left: auto; right: var(--edge); }
-.mv-main { display: flex; align-items: center; gap: 1.125rem; padding: 1.125rem 1.375rem 1.25rem 1.125rem; }
+[data-side="right"] .maneuver { left: auto; right: var(--edge); transform-origin: top right; }
+.mv-main { display: flex; align-items: center; gap: 1.125rem; padding: 1.25rem 1.5rem 1.25rem 1.25rem; }
 .mv-glyph { width: 5.25rem; height: 5.25rem; flex: none; display: grid; place-items: center; }
 .mv-glyph svg { width: 100%; height: 100%; }
 .mv-text { flex: 1; min-width: 0; }
-.mv-dist { font-family: var(--font-display); font-size: 3.25rem; font-weight: 800; letter-spacing: -.04em; line-height: 1; }
-.mv-dist small { font-size: 1.75rem; font-weight: 700; letter-spacing: -.02em; margin-left: .2rem; opacity: .9; }
-.mv-street { font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; margin-top: .375rem; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.mv-dist { font-family: var(--font-display); font-size: 3.25rem; font-weight: 750; letter-spacing: -.04em; line-height: 1; }
+.mv-dist small { font-size: 1.75rem; font-weight: 650; letter-spacing: -.02em; margin-left: .2rem; opacity: .9; }
+.mv-street { font-size: 1.5rem; font-weight: 650; letter-spacing: -.02em; line-height: 1.15; margin-top: .375rem; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .mv-street.dim { opacity: .62; font-weight: 600; }
-.mv-then { display: flex; align-items: center; gap: .625rem; padding: .625rem 1.375rem; background: rgba(255, 255, 255, .06); border-top: 1px solid rgba(255, 255, 255, .06); font-weight: 600; font-size: 1.0625rem; color: rgba(255, 255, 255, .78); }
+/* "Then" sits on a nested capsule rather than behind a divider line */
+.mv-then { display: flex; align-items: center; gap: .625rem; margin: -.25rem .625rem .625rem; padding: .5rem 1rem; border-radius: var(--r-pill); background: rgba(255, 255, 255, .08); font-weight: 600; font-size: 1.0625rem; color: rgba(255, 255, 255, .8); }
 .mv-then svg { width: 2rem; height: 2rem; }
 .mv-swap { animation: mv-swap var(--t-med) var(--ease) both; }
 @keyframes mv-swap { from { opacity: 0; transform: translateX(-.75rem); } }
-@keyframes slide-down { from { opacity: 0; transform: translateY(-1rem); } }
-@keyframes slide-up { from { opacity: 0; transform: translateY(1rem); } }
 
-/* Trip summary (bottom, driver side) */
+/* Trip summary (bottom, driver side) — grows in place when expanded */
 .trip {
   position: absolute; left: var(--edge); bottom: var(--edge);
   width: var(--panel-w);
-  border-radius: var(--r-xl);
+  border-radius: var(--r-outer);
   overflow: hidden;
-  animation: slide-up var(--t-slow) var(--ease) both;
+  transform-origin: bottom left;
+  animation: lg-in .6s var(--spring-soft) both;
 }
-[data-side="right"] .trip { left: auto; right: var(--edge); }
-.trip-bar { display: flex; align-items: center; width: 100%; padding: .875rem 1.125rem .875rem 1.375rem; gap: .5rem; text-align: left; }
+[data-side="right"] .trip { left: auto; right: var(--edge); transform-origin: bottom right; }
+.trip-bar { display: flex; align-items: center; width: 100%; padding: 1rem 1rem 1rem 1.5rem; gap: .5rem; text-align: left; }
 .trip-stats { flex: 1; display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: .5rem; }
-.trip-v { font-family: var(--font-display); font-size: 1.75rem; font-weight: 800; letter-spacing: -.03em; line-height: 1.05; }
+.trip-v { font-family: var(--font-display); font-size: 1.75rem; font-weight: 750; letter-spacing: -.03em; line-height: 1.05; }
 .trip-v.arr { color: var(--green); }
-.trip-l { font-size: .8125rem; font-weight: 600; color: var(--text-2); margin-top: .125rem; }
-.trip-chev { width: 2.5rem; height: 2.5rem; border-radius: 50%; display: grid; place-items: center; background: var(--fill-2); color: var(--text-2); transition: transform var(--t-med) var(--ease); }
+.trip-l { font-size: .875rem; font-weight: 600; color: var(--text-2); margin-top: .125rem; }
+.trip-chev { width: 2.75rem; height: 2.75rem; border-radius: 50%; display: grid; place-items: center; background: var(--fill-2); color: var(--text-2); transition: transform .5s var(--spring-soft); }
 .trip.open .trip-chev { transform: rotate(180deg); }
-.trip-extra { display: none; padding: 0 var(--pad) var(--pad); }
-.trip.open .trip-extra { display: block; animation: view-in var(--t-med) var(--ease) both; }
-.trip-soc { display: flex; align-items: center; gap: .625rem; padding: .25rem 0 .875rem; font-weight: 600; color: var(--text-2); font-size: .9375rem; }
+.trip-extra { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .5s var(--ease); }
+.trip-extra > .trip-inner { min-height: 0; overflow: hidden; padding: 0 var(--pad); opacity: 0; transition: opacity .25s linear, padding .5s var(--ease); }
+.trip.open .trip-extra { grid-template-rows: 1fr; }
+.trip.open .trip-extra > .trip-inner { opacity: 1; padding-bottom: var(--pad); transition-delay: .08s, 0s; }
+.trip-soc { display: flex; align-items: center; gap: .625rem; padding: .25rem .25rem .875rem; font-weight: 600; color: var(--text-2); font-size: .9375rem; }
 .trip-soc b { color: var(--text); }
 .trip-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
 .trip-grid .tile { color: var(--text); }
 .trip-grid .tile svg { color: var(--accent); }
 .trip-end { margin-top: .625rem; }
-.sim-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: .75rem; font-size: .875rem; font-weight: 600; color: var(--text-2); }
+.sim-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: .75rem; padding-left: .25rem; font-size: .9375rem; font-weight: 600; color: var(--text-2); }
 
-/* Speed */
-.speed { width: 5rem; height: 5rem; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.speed-v { font-family: var(--font-display); font-size: 2rem; font-weight: 800; letter-spacing: -.04em; line-height: 1; }
-.speed-u { font-size: .6875rem; font-weight: 700; color: var(--text-2); margin-top: .125rem; text-transform: uppercase; letter-spacing: .04em; }
+/* Speed — round glass */
+.speed { width: 5.25rem; height: 5.25rem; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.speed-v { font-family: var(--font-display); font-size: 2.125rem; font-weight: 750; letter-spacing: -.04em; line-height: 1; }
+.speed-u { font-size: .75rem; font-weight: 600; color: var(--text-2); margin-top: .125rem; }
 
 /* Status pills (rerouting, GPS) */
-.nav-pill { position: absolute; top: var(--edge); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: .625rem; height: 3rem; padding: 0 1.25rem; border-radius: var(--r-pill); font-weight: 700; animation: toast-in var(--t-med) var(--spring) both; }
+.nav-pill { position: absolute; top: calc(var(--edge) + .25rem); left: 0; right: 0; width: max-content; margin: 0 auto; display: flex; align-items: center; gap: .625rem; height: 3rem; padding: 0 1.375rem 0 1.125rem; border-radius: var(--r-pill); font-weight: 700; transform-origin: top center; animation: lg-in .56s var(--spring-soft) both; }
 
 /* Arrival */
-.arrival { position: absolute; left: var(--edge); bottom: var(--edge); width: var(--panel-w); border-radius: var(--r-xl); padding: 1.5rem var(--pad) var(--pad); animation: slide-up var(--t-slow) var(--ease) both; }
-[data-side="right"] .arrival { left: auto; right: var(--edge); }
-.arrival-flag { width: 3.5rem; height: 3.5rem; border-radius: 50%; display: grid; place-items: center; background: var(--red); color: #fff; margin-bottom: .875rem; }
-.arrival-title { font-family: var(--font-display); font-size: 1.875rem; font-weight: 800; letter-spacing: -.03em; }
-.arrival-sub { color: var(--text-2); margin-top: .25rem; font-size: 1.0625rem; }
+.arrival { position: absolute; left: var(--edge); bottom: var(--edge); width: var(--panel-w); border-radius: var(--r-outer); padding: 1.5rem var(--pad) var(--pad); transform-origin: bottom left; animation: lg-in .6s var(--spring-soft) both; }
+[data-side="right"] .arrival { left: auto; right: var(--edge); transform-origin: bottom right; }
+.arrival-flag { width: 3.5rem; height: 3.5rem; margin-left: .375rem; border-radius: 50%; display: grid; place-items: center; background: var(--red); color: #fff; margin-bottom: .875rem; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35); }
+.arrival-title { font-family: var(--font-display); font-size: 1.875rem; font-weight: 750; letter-spacing: -.03em; padding: 0 .375rem; }
+.arrival-sub { color: var(--text-2); margin-top: .25rem; font-size: 1.0625rem; padding: 0 .375rem; }
 .arrival .btn { margin-top: 1.125rem; }

@@ -1,10 +1,11 @@
 import type { LngLat } from '../types';
 
 /**
- * Solar elevation (degrees) for a moment and place — NOAA approximation, ±0.5°.
- * Used for automatic day/night map appearance, like Apple Maps and Tesla do.
+ * Sun position for a moment and place — NOAA approximation, ±0.5°.
+ * elevation: degrees above the horizon; azimuth: degrees clockwise from north.
+ * Used for automatic day/night appearance and to light the glass rims from the sun.
  */
-export function solarElevation(date: Date, [lng, lat]: LngLat): number {
+export function sunPosition(date: Date, [lng, lat]: LngLat): { elevation: number; azimuth: number } {
   const rad = Math.PI / 180;
   const jd = date.getTime() / 86400000 + 2440587.5;
   const n = jd - 2451545.0;
@@ -18,8 +19,13 @@ export function solarElevation(date: Date, [lng, lat]: LngLat): number {
   const lst = (gmst * 15 + lng) * rad;
   const H = lst - α;
   const φ = lat * rad;
-  return Math.asin(Math.sin(φ) * Math.sin(δ) + Math.cos(φ) * Math.cos(δ) * Math.cos(H)) / rad;
+  const elevation = Math.asin(Math.sin(φ) * Math.sin(δ) + Math.cos(φ) * Math.cos(δ) * Math.cos(H)) / rad;
+  const az = Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(φ) - Math.tan(δ) * Math.cos(φ)) / rad + 180;
+  return { elevation, azimuth: ((az % 360) + 360) % 360 };
 }
+
+export const solarElevation = (date: Date, at: LngLat) => sunPosition(date, at).elevation;
+export const solarAzimuth = (date: Date, at: LngLat) => sunPosition(date, at).azimuth;
 
 /** Day while the sun is above civil-twilight-ish threshold. */
 export const isDaylight = (date: Date, at: LngLat) => solarElevation(date, at) > -4;

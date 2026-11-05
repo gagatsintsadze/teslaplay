@@ -10,26 +10,27 @@ export function mountControls(app: App, hud: HTMLElement) {
   const { store } = app;
   const eq = shallowEqualArray as any;
 
+  // Grouped by function, icons only: settings | layers [traffic · 3D] | compass … speed | zoom | locate
   const status = h('div.status.glass', { role: 'status' });
+  const settings = h('button.ctl-single.glass.lg-flex', { 'aria-label': 'Settings', onclick: () => store.set({ settingsOpen: true }) }, icon('gear', 24));
+  const traffic = h('button.ctl', { 'aria-label': 'Live traffic', 'aria-pressed': 'false', onclick: () => app.updateSettings({ traffic: !store.get().settings.traffic }) }, icon('traffic', 22));
+  const btn3d = h('button.ctl', { 'aria-label': '3D map', 'aria-pressed': 'false', onclick: () => app.updateSettings({ view3D: !store.get().settings.view3D }) }, icon('cube', 23));
+  const layers = h('div.ctl-group.glass.lg-flex', null, traffic, btn3d);
   const compassNeedle = h('div.compass', null, h('span.compass-n', null, 'N'));
-  const compass = h('button.ctl', { 'aria-label': 'Point north', onclick: () => app.northUp() }, compassNeedle);
-  const btn3d = h('button.ctl.label', { 'aria-label': 'Toggle 3D', onclick: () => app.updateSettings({ view3D: !store.get().settings.view3D }) }, '3D');
-  const traffic = h('button.ctl', { 'aria-label': 'Toggle traffic', onclick: () => app.updateSettings({ traffic: !store.get().settings.traffic }) }, icon('traffic', 22));
-  const settings = h('button.ctl', { 'aria-label': 'Settings', onclick: () => store.set({ settingsOpen: true }) }, icon('gear', 22));
-  const group = h('div.ctl-group.glass', null, settings, traffic, btn3d, compass);
+  const compass = h('button.ctl-single.glass.lg-flex.compass-btn', { 'aria-label': 'Point north', onclick: () => app.northUp() }, compassNeedle);
 
   const speedV = h('div.speed-v.num', null, '0');
   const speedU = h('div.speed-u', null, 'km/h');
   const speed = h('div.speed.glass', { 'aria-label': 'Speed' }, speedV, speedU);
 
-  const zoom = h('div.ctl-group.glass.zoom-group', null,
+  const zoom = h('div.ctl-group.glass.lg-flex.zoom-group', null,
     h('button.ctl', { 'aria-label': 'Zoom in', onclick: () => app.zoomBy(1) }, icon('plus', 22)),
     h('button.ctl', { 'aria-label': 'Zoom out', onclick: () => app.zoomBy(-1) }, icon('minus', 22)),
   );
-  const locate = h('button.ctl-single.glass.locate.pressable', { 'aria-label': 'My location', onclick: () => app.cycleLocate() });
+  const locate = h('button.ctl-single.glass.lg-flex.locate', { 'aria-label': 'My location', onclick: () => app.cycleLocate() });
 
-  const col = h('div.controls', null, status, group, h('div.spacer'), speed, zoom, locate);
-  const recenter = h('button.recenter.glass.pressable.hidden', { onclick: () => app.recenter() }, icon('locate', 20), 'Recenter');
+  const col = h('div.controls', null, status, settings, layers, compass, h('div.spacer'), speed, zoom, locate);
+  const recenter = h('button.recenter.glass.lg-flex.hidden', { onclick: () => app.recenter() }, icon('locate', 20), 'Recenter');
   const toasts = h('div.toasts', { 'aria-live': 'polite' });
   hud.append(col, recenter, toasts);
 
@@ -47,10 +48,12 @@ export function mountControls(app: App, hud: HTMLElement) {
   store.select((s) => [s.azimuth, s.navigating, s.settings.view3D, s.settings.traffic, s.trafficAvailable], () => {
     const s = store.get();
     compassNeedle.style.transform = `rotate(${-s.azimuth}deg)`;
-    compass.style.display = Math.abs(((s.azimuth + 180) % 360) - 180) > 1 || s.navigating ? '' : 'none';
-    setText(btn3d, s.settings.view3D ? '3D' : '2D');
+    toggleClass(compass, 'hidden', !(Math.abs(((s.azimuth + 180) % 360) - 180) > 1 || s.navigating));
     toggleClass(btn3d, 'on', s.settings.view3D);
-    toggleClass(traffic, 'on', s.settings.traffic && s.trafficAvailable);
+    btn3d.setAttribute('aria-pressed', String(s.settings.view3D));
+    const trafficOn = s.settings.traffic && s.trafficAvailable;
+    toggleClass(traffic, 'on', trafficOn);
+    traffic.setAttribute('aria-pressed', String(trafficOn));
     traffic.style.display = s.trafficAvailable ? '' : 'none';
   }, { equals: eq });
 
@@ -70,6 +73,16 @@ export function mountControls(app: App, hud: HTMLElement) {
     setText(speedU, unit);
   });
 
+  // While driving, map chrome recedes after a few idle seconds; any touch brings it back.
+  let idleTimer = 0;
+  const wake = () => {
+    hud.classList.remove('idle');
+    clearTimeout(idleTimer);
+    if (store.get().navigating) idleTimer = window.setTimeout(() => hud.classList.add('idle'), 6000);
+  };
+  document.addEventListener('pointerdown', wake, { passive: true, capture: true });
+  store.select((s) => s.navigating, wake);
+
   const toastEls = new Map<number, HTMLElement>();
   store.select((s) => s.toasts, (list) => {
     const ids = new Set(list.map((t) => t.id));
@@ -79,7 +92,7 @@ export function mountControls(app: App, hud: HTMLElement) {
     list.forEach((t) => {
       if (toastEls.has(t.id)) return;
       const ic = t.tone === 'warn' ? icon('warning', 18, 'ic-warn') : t.tone === 'err' ? icon('warning', 18, 'ic-err') : t.tone === 'ok' ? icon('check', 18, 'ic-ok') : icon('info', 18);
-      const el = h('div.toast.glass', null, ic, t.text);
+      const el = h('div.toast.glass', { role: t.tone === 'err' ? 'alert' : 'status' }, ic, t.text);
       toastEls.set(t.id, el);
       toasts.appendChild(el);
     });

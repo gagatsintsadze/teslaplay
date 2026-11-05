@@ -4,7 +4,17 @@ import { h, mount, removeWithAnimation } from '../core/dom';
 import { isTesla, teslaFirmware } from '../core/env';
 import { VEHICLES, vehicleById } from '../services/ev';
 import type { Settings } from '../types';
+import type { Material } from './glass';
+import { lensSupported } from './glass';
 import { icon } from './icons';
+import { segmented } from './segmented';
+
+function glassNote(material: Material, choice: Settings['glass']): string {
+  if (choice === 'liquid' && material !== 'liquid') return 'Lensing needs a Chromium browser — using Frosted';
+  if (choice !== 'auto') return material === 'liquid' ? 'Lensing, light and depth' : material === 'frosted' ? 'Blurred glass, no lensing' : 'Opaque panels, lightest on the GPU';
+  const now = material === 'liquid' ? 'Liquid' : material === 'frosted' ? 'Frosted' : 'Solid';
+  return `Now ${now}${lensSupported ? '' : ' (no lensing in this browser)'} · steps down if driving gets choppy`;
+}
 
 /** iOS-style grouped settings sheet. */
 export function mountSettings(app: App, hud: HTMLElement) {
@@ -19,7 +29,7 @@ export function mountSettings(app: App, hud: HTMLElement) {
     if (open && !sheet) {
       backdrop = h('div.backdrop', { onclick: close });
       body = h('div.sheet-body');
-      sheet = h('section.sheet', { role: 'dialog', 'aria-label': 'Settings' },
+      sheet = h('section.sheet.glass.glass-lg', { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Settings' },
         h('div.sheet-head', null, h('div.sheet-title', null, 'Settings'), h('button.btn.btn-tinted.pressable', { onclick: close, style: { minHeight: '2.75rem' } }, 'Done')),
         body,
       );
@@ -31,7 +41,7 @@ export function mountSettings(app: App, hud: HTMLElement) {
       sheet = backdrop = body = null;
     }
   });
-  store.select((s) => [s.settings, s.lite, s.trafficAvailable], () => { if (body) render(); }, { equals: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] });
+  store.select((s) => [s.settings, s.material, s.trafficAvailable], () => { if (body) render(); }, { equals: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] });
 
   function render() {
     if (!body) return;
@@ -41,8 +51,7 @@ export function mountSettings(app: App, hud: HTMLElement) {
     const set = (patch: Partial<Settings>) => app.updateSettings(patch);
     const v = vehicleById(st.vehicleId);
 
-    const seg = <T extends string | number>(value: T, options: [T, string][], on: (v: T) => void) =>
-      h('div.segmented', null, ...options.map(([val, label]) => h('button', { class: { on: val === value }, onclick: () => on(val) }, label)));
+    const seg = <T extends string | number>(key: string, value: T, options: [T, string][], on: (v: T) => void) => segmented(key, value, options, on);
     const sw = (on: boolean, toggle: () => void, label: string) => h('button.switch', { class: { on }, role: 'switch', 'aria-checked': on ? 'true' : 'false', 'aria-label': label, onclick: toggle });
     const row = (label: string, sub: string | null, control: Node) => h('div.set-row', null, h('div.label', null, label, sub ? h('small', null, sub) : null), control);
     const group = (caption: string, ...rows: (Node | null)[]) => h('div.set-section', null, h('div.set-caption', null, caption), h('div.set-group', null, ...rows), );
@@ -72,24 +81,24 @@ export function mountSettings(app: App, hud: HTMLElement) {
 
     mount(body,
       group('Appearance',
-        row('Map appearance', st.themeMode === 'auto' ? 'Follows sunrise and sunset' : null, seg(st.themeMode, [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']], (m) => set({ themeMode: m }))),
-        row('Text size', null, seg(st.textSize, [['standard', 'Standard'], ['large', 'Large'], ['larger', 'Larger']], (t) => set({ textSize: t }))),
-        row('Driver side', 'Where cards and guidance appear', seg(st.driverSide, [['left', 'Left'], ['right', 'Right']], (d) => set({ driverSide: d }))),
-        row('Reduce effects', s.lite ? 'Glass blur off for smoother maps' : 'Glass blur and animations on', seg(st.perf, [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']], (p) => set({ perf: p }))),
+        row('Map appearance', st.themeMode === 'auto' ? 'Follows sunrise and sunset' : null, seg('theme', st.themeMode, [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']], (m) => set({ themeMode: m }))),
+        row('Text size', null, seg('text', st.textSize, [['standard', 'Standard'], ['large', 'Large'], ['larger', 'Larger']], (t) => set({ textSize: t }))),
+        row('Driver side', 'Where cards and guidance appear', seg('side', st.driverSide, [['left', 'Left'], ['right', 'Right']], (d) => set({ driverSide: d }))),
+        row('Glass', glassNote(s.material, st.glass), seg('glass', st.glass, [['auto', 'Auto'], ['liquid', 'Liquid'], ['frosted', 'Frosted'], ['solid', 'Solid']], (g) => set({ glass: g }))),
       ),
       group('Navigation',
         row('Voice guidance', app.voice.canSpeak ? null : 'No speech voice in this browser — chimes instead', sw(st.voice, () => set({ voice: !st.voice }), 'Voice guidance')),
         row('Avoid tolls', null, sw(st.avoidTolls, () => set({ avoidTolls: !st.avoidTolls }), 'Avoid tolls')),
         row('3D perspective', 'Tilted map with buildings while driving', sw(st.view3D, () => set({ view3D: !st.view3D }), '3D perspective')),
         row('Live traffic', s.trafficAvailable ? null : 'Requires a paid Yandex plan', sw(st.traffic && s.trafficAvailable, () => set({ traffic: !st.traffic }), 'Live traffic')),
-        row('Units', null, seg(st.units, [['metric', 'Kilometres'], ['imperial', 'Miles']], (u) => set({ units: u }))),
+        row('Units', null, seg('units', st.units, [['metric', 'Kilometres'], ['imperial', 'Miles']], (u) => set({ units: u }))),
       ),
       group('Vehicle & charging',
         row('Model', null, vehicleSelect),
         row('Usable battery', 'kWh', num(st.usableKWh, String(v.usableKWh), (n) => set({ usableKWh: n || v.usableKWh }), 'Usable battery kWh')),
         row('Consumption', `Wh/km · preset ${v.whPerKm}`, num(st.consumption, String(v.whPerKm), (n) => set({ consumption: n }), 'Consumption Wh/km')),
-        row('Arrive with at least', null, seg(st.reserveSoc, [[5, '5%'], [10, '10%'], [15, '15%'], [20, '20%']], (r) => set({ reserveSoc: r }))),
-        row('Charge up to', 'On trip charging stops', seg(st.maxChargeSoc, [[70, '70%'], [80, '80%'], [90, '90%']], (m) => set({ maxChargeSoc: m }))),
+        row('Arrive with at least', null, seg('reserve', st.reserveSoc, [[5, '5%'], [10, '10%'], [15, '15%'], [20, '20%']], (r) => set({ reserveSoc: r }))),
+        row('Charge up to', 'On trip charging stops', seg('maxsoc', st.maxChargeSoc, [[70, '70%'], [80, '80%'], [90, '90%']], (m) => set({ maxChargeSoc: m }))),
       ),
       h('div.set-foot', null, 'Range estimates use speed, outside temperature and elevation. Tune consumption to match your car’s trip meter for best accuracy.'),
       group('Map data',

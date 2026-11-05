@@ -3,6 +3,7 @@ import { storage } from './core/storage';
 import type { FollowMode } from './nav/follow';
 import type { NavSnapshot } from './nav/session';
 import type { LocationStatus } from './services/location';
+import type { Material } from './ui/glass';
 import type { Fix, Place, RouteResult, Settings, TripPlan, Weather } from './types';
 
 export type PanelView = 'home' | 'search' | 'place' | 'planner';
@@ -12,6 +13,8 @@ export interface Toast { id: number; text: string; tone: 'info' | 'ok' | 'warn' 
 export interface AppState {
   theme: 'light' | 'dark';
   lite: boolean;
+  /** Effective glass material after device checks and frame-rate fallbacks. */
+  material: Material;
   settings: Settings;
   demo: boolean;
 
@@ -75,7 +78,7 @@ export const DEFAULT_SETTINGS: Settings = {
   maxChargeSoc: 80,
   avoidTolls: false,
   driverSide: 'left',
-  perf: 'auto',
+  glass: 'auto',
   textSize: isTesla ? 'large' : 'standard',
   traffic: true,
   view3D: true,
@@ -86,6 +89,7 @@ export function initialState(demo: boolean): AppState {
   return {
     theme: 'dark',
     lite: false,
+    material: 'frosted',
     settings: { ...DEFAULT_SETTINGS, ...storage.get<Partial<Settings>>('settings', {}) },
     demo,
     panel: 'home',

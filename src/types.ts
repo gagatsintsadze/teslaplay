@@ -133,7 +133,8 @@ export interface Settings {
   maxChargeSoc: number;
   avoidTolls: boolean;
   driverSide: 'left' | 'right';
-  perf: 'auto' | 'on' | 'off';
+  /** Liquid (lensed glass), Frosted (blur only), Solid (opaque). Auto picks by device and steps down if driving gets choppy. */
+  glass: 'auto' | 'liquid' | 'frosted' | 'solid';
   textSize: 'standard' | 'large' | 'larger';
   traffic: boolean;
   view3D: boolean;

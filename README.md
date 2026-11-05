@@ -59,10 +59,22 @@ Any static host with **HTTPS** works; geolocation requires it (Cloudflare Pages,
 ## Tesla browser notes
 - **GPS:** `navigator.geolocation` works in the Tesla browser, but several firmware versions have been reported to freeze the position stream. `LocationService` derives speed and heading when they're missing, holds the heading while stopped, and runs a watchdog that restarts the watch after 12 s of silence.
 - **Voice:** Tesla's Linux Chromium may not have any speech voices. Prompts then fall back to a soft chime, and the banner carries the details.
-- **Performance:** "Reduce effects" switches on automatically for low-core Tesla browsers, or when frame pacing measures under 40 fps. It replaces glass blur with solid surfaces and lowers the camera update rate.
+- **Performance:** Settings → Glass defaults to *Auto*: Liquid on capable Chromium, Solid on low-core Tesla browsers or when frame pacing measures under 40 fps. While driving, Auto also watches the frame rate and steps down (Liquid → Frosted → Solid) if the map stutters for 6 s, with a short notice.
 - **Layout:** cards sit on the driver side (left by default, switchable in Settings), touch targets are ≥ 56 px, and the Tesla browser gets the *Large* text size by default. There's no hover-only UI.
 - **Fullscreen:** the community `youtube.com/redirect?q=<your-url>` trick opens a site fullscreen, but Tesla only allows fullscreen while parked. The app is designed for the normal windowed browser.
 - **Compatibility:** syntax is down-levelled to Chrome 79. CSS uses flexbox `gap` (Chrome 84+), which every reasonably recent Tesla firmware supports.
+
+## Design: Liquid Glass
+
+The interface follows Apple's Liquid Glass design language (iOS / iPadOS 26), adapted for the web and a car screen:
+
+- **Two layers.** The map is the content layer and stays clear of glass. Everything you touch — the driver-side panel, the control column, the guidance banner, the trip bar, toasts — floats above it in a functional layer of glass. Glass never sits on glass; inside a panel, cards and buttons use vibrant fills.
+- **The material.** Regular glass only (never mixed with the clear variant). Each glass element bends the map beneath it through a lens: an SVG displacement map shaped to that element's size and corner radius, applied with `backdrop-filter` (`ui/glass.ts`). The middle stays flat and the edge refracts, like a thick pane. Large glass is thicker: more blur, deeper shadows and softer scattering. The rims carry a specular highlight lit from the sun's direction relative to the map heading (`core/sun.ts`), with a fixed top-left light at night.
+- **Response to touch.** Glass lights up from the fingertip, and nearby glass catches a little of that light. Floating controls swell slightly under the finger and spring back. New glass materializes, growing into place rather than fading in. Toggle and slider knobs turn into glass while you drag them.
+- **Shape.** Controls are capsules. Nested shapes are concentric: the panel radius equals the search field's capsule radius plus the panel padding. When the panel collapses to just the search field, it is already a capsule. Map controls are grouped by function (settings · layers · compass … zoom · locate) and use icons only.
+- **Tint with purpose.** Only primary actions carry colour (Directions, Go, End Route), as tinted glass rather than flat fills.
+- **Hierarchy.** Scroll edges dissolve content under the panel's edges instead of using divider lines. Section headers use title case. Rows are taller. Settings is an inspector that grows out of the gear button, on thicker and more opaque glass, while the rest of the interface recedes. While driving, map controls fade away after 6 s idle; a tap brings them back.
+- **Fallbacks and accessibility.** Lensing needs Chromium (the Tesla browser is Chromium). Elsewhere glass is *Frosted*. *Solid* is used for low-power cars, and also when the system asks for reduced transparency. Increase Contrast switches to black or white surfaces with a contrasting border. Reduce Motion removes the elastic effects.
 
 ## Architecture
 
@@ -92,7 +104,9 @@ src/
     voice.ts         speech synthesis with chime fallback
     demo*.ts         demo data, street graph, mock services
   ui/                panel (search / place / planner), controls, navigation HUD, settings, icons, glyphs
-styles/              design tokens + component styles (Apple-style materials, light/dark)
+    glass.ts         Liquid Glass engine: per-element lens filters, sun-lit rims, touch light, frame-rate guard
+    segmented.ts     segmented control with a sliding thumb
+styles/              design tokens + Liquid Glass material + component styles (light/dark)
 ```
 
 ### How turn-by-turn works with Yandex

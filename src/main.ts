@@ -3,6 +3,7 @@ import { loadConfig } from './config';
 import { isTesla } from './core/env';
 import { bindMap } from './mapsync';
 import { mountControls } from './ui/controls';
+import { GlassEngine } from './ui/glass';
 import { mountNavHud } from './ui/navhud';
 import { loadErrorMessage, showOnboarding } from './ui/onboarding';
 import { mountPanel } from './ui/panel';
@@ -22,6 +23,19 @@ async function main() {
   const mapEl = document.getElementById('map')!;
   app.store.select((s) => s.settings.driverSide, (side) => { hud.dataset.side = side; });
   app.store.select((s) => s.lite, (lite) => document.documentElement.classList.toggle('lite', lite));
+
+  // Liquid Glass: lensing, sun-lit rims and touch light for everything in the HUD.
+  const glass = new GlassEngine(hud);
+  const root = document.documentElement;
+  app.store.select((s) => s.material, (m) => {
+    root.classList.remove('mat-liquid', 'mat-frosted', 'mat-solid');
+    root.classList.add(`mat-${m}`);
+    glass.setEnabled(m === 'liquid');
+  });
+  const relight = () => glass.setLight(app.lightAngle());
+  app.store.select((s) => s.azimuth, relight);
+  setInterval(relight, 60e3);
+  app.store.select((s) => s.settingsOpen, (open) => hud.classList.toggle('modal', open));
   app.store.select((s) => s.navigating, (n) => { hud.dataset.mode = n ? 'nav' : 'explore'; });
 
   mountPanel(app, hud);
@@ -37,6 +51,7 @@ async function main() {
     return;
   }
   bindMap(app);
+  relight();
   requestAnimationFrame(() => document.getElementById('boot')!.classList.add('done'));
 }
 

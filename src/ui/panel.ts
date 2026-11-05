@@ -16,12 +16,22 @@ export function mountPanel(app: App, hud: HTMLElement) {
   const field = h('label.field', null, icon('search', 20), input, clear);
   const cancel = h('button.cancel', null, 'Cancel');
   const bar = h('div.search', null, field, cancel);
+  // Search stays pinned above the scrolling content; content dissolves under the edges
+  // (scroll edge effect) instead of sitting behind divider lines.
   const head = h('div.panel-head', null, bar);
   const body = h('div.panel-body');
-  const scroll = h('div.panel-scroll', null, head, body);
+  const scroll = h('div.panel-scroll.scroll-edge', null, body);
   const foot = h('div.panel-foot');
-  const el = h('section.panel.glass', { 'aria-label': 'Search and directions' }, scroll, foot);
+  const el = h('section.panel.glass.glass-lg', { 'aria-label': 'Search and directions' }, head, scroll, foot);
   hud.appendChild(el);
+
+  const edges = () => {
+    const max = scroll.scrollHeight - scroll.clientHeight;
+    toggleClass(scroll, 'se-t', scroll.scrollTop > 2);
+    toggleClass(scroll, 'se-b', max - scroll.scrollTop > 2);
+  };
+  scroll.addEventListener('scroll', edges, { passive: true });
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(edges).observe(body);
 
   input.addEventListener('focus', () => {
     if (store.get().panel !== 'search') app.openSearch();
@@ -43,7 +53,7 @@ export function mountPanel(app: App, hud: HTMLElement) {
     const s = store.get();
     toggleClass(el, 'hidden', s.navigating);
     toggleClass(el, 'compact', s.panel === 'home' && s.collapsed);
-    head.style.display = s.panel === 'home' || s.panel === 'search' ? '' : 'none';
+    head.hidden = !(s.panel === 'home' || s.panel === 'search');
     cancel.style.display = s.panel === 'search' ? '' : 'none';
     clear.style.display = s.query ? '' : 'none';
     if (s.panel !== 'search' && input.value) input.value = '';
@@ -72,6 +82,7 @@ export function mountPanel(app: App, hud: HTMLElement) {
     else { foot.style.display = 'none'; mount(foot); }
     scroll.scrollTop = keepScroll;
     lastPanel = s.panel;
+    edges();
   }, { equals: shallowEqualArray as any });
 }
 
@@ -187,7 +198,7 @@ function placeView(app: App, p: Place): Node[] {
   if (p.coord) info.push(infoRow('Coordinates', `${p.coord[1].toFixed(5)}, ${p.coord[0].toFixed(5)}`));
 
   return [
-    h('div.view-head', { style: { paddingTop: 'var(--pad)' } },
+    h('div.view-head', null,
       glyphFor(p, 'lg'),
       h('div.grow', null, h('div.view-title', null, p.name), subtitle ? h('div.view-sub', null, subtitle) : null),
       closeButton(() => app.closePlace()),

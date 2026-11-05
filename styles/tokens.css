@@ -1,107 +1,140 @@
 /* ─────────────────────────────────────────────────────────────
-   Teslaplay design tokens
-   Apple-inspired: system colors, glass materials, continuous radii,
-   generous touch targets sized for a car screen at arm's length.
+   Teslaplay design tokens — Liquid Glass
+   Functional layer (controls, navigation) floats above the map in
+   Liquid Glass; nested shapes are concentric; capsules for controls.
    ───────────────────────────────────────────────────────────── */
+
+@property --lg-light { syntax: "<angle>"; inherits: true; initial-value: 320deg; }
+@property --se-top { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --se-bottom { syntax: "<length>"; inherits: false; initial-value: 0px; }
+/* Per-element lens filter (set by ui/glass.ts); must not leak into nested elements. */
+@property --lg-lens { syntax: "*"; inherits: false; }
 
 :root {
   --ui-scale: 1;
   --font: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Noto Sans Georgian", "Helvetica Neue", Arial, sans-serif;
   --font-display: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, "Noto Sans Georgian", sans-serif;
 
-  /* Motion — iOS sheet curve + a soft spring for presses */
+  /* Motion — fluid, gel-like */
   --ease: cubic-bezier(.32, .72, 0, 1);
   --ease-out: cubic-bezier(.22, 1, .36, 1);
   --ease-in: cubic-bezier(.4, 0, 1, 1);
-  --spring: cubic-bezier(.34, 1.4, .64, 1);
+  --spring: cubic-bezier(.34, 1.56, .64, 1);
+  --spring-soft: cubic-bezier(.28, 1.28, .52, 1);
   --t-fast: 160ms;
   --t-med: 320ms;
   --t-slow: 520ms;
 
-  /* Shape */
-  --r-xl: 1.75rem;
-  --r-lg: 1.375rem;
-  --r-md: 1rem;
-  --r-sm: .75rem;
-  --r-pill: 999px;
-
-  /* Space */
-  --edge: 1rem;          /* distance from screen edge to floating UI */
-  --gap: .75rem;
-  --pad: 1.125rem;       /* inner card padding */
-  --tap: 3.5rem;         /* minimum touch target (56px @1x) */
+  /* Concentric geometry: inner radius = outer radius − padding */
+  --edge: 1rem;                                   /* inset from the screen edge */
+  --pad: .875rem;                                 /* floating panel padding */
+  --r-outer: calc(var(--tap) / 2 + var(--pad));  /* floating panels: concentric with the capsule field inside */
+  --r-inner: calc(var(--r-outer) - var(--pad));   /* cards nested in panels */
+  --r-nested: .875rem;                            /* elements nested in cards */
+  --r-pill: 999px;                                /* capsules: controls */
+  --tap: 3.5rem;
   --tap-lg: 4rem;
 
-  /* System palette (dark variants — vivid on dark map) */
+  /* System palette */
   --blue: #0a84ff;
-  --blue-deep: #0060df;
   --green: #30d158;
   --green-deep: #1fa846;
   --red: #ff453a;
   --orange: #ff9f0a;
   --yellow: #ffd60a;
   --teal: #64d2ff;
-  --mint: #63e6e2;
   --indigo: #5e5cf6;
   --purple: #bf5af2;
   --pink: #ff375f;
   --gray: #8e8e93;
 
   --panel-w: clamp(22.5rem, 31vw, 27.5rem);
+
+  /* Light direction for specular rims (set from sun position vs map heading). */
+  --lg-light: 320deg;
+  transition: --lg-light 1.2s var(--ease-out);
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
   --map-bg: #161a21;
-  --surface: rgba(28, 28, 32, .74);
-  --surface-solid: #1c1c20;
-  --surface-raised: rgba(44, 44, 50, .82);
-  --ink: rgba(16, 17, 20, .9);          /* maneuver banner */
-  --fill: rgba(120, 120, 128, .26);
-  --fill-2: rgba(120, 120, 128, .17);
-  --fill-3: rgba(118, 118, 128, .12);
-  --hairline: rgba(255, 255, 255, .08);
-  --hairline-strong: rgba(255, 255, 255, .14);
+  /* Liquid Glass — regular variant */
+  --glass-tint: rgba(40, 42, 48, .46);
+  --glass-tint-lg: rgba(30, 31, 36, .56);
+  --glass-tint-dark: rgba(12, 13, 16, .74);
+  --glass-blur-sm: 3px;
+  --glass-blur-lg: 14px;
+  --glass-sat: 1.9;
+  --glass-bright: .9;
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, .09), rgba(255, 255, 255, 0) 46%);
+  --rim-hi: rgba(255, 255, 255, .62);
+  --rim-lo: rgba(255, 255, 255, .1);
+  --rim-mid: rgba(255, 255, 255, .26);
+  --glass-shadow-sm: 0 8px 22px rgba(0, 0, 0, .34), 0 1px 4px rgba(0, 0, 0, .26);
+  --glass-shadow-lg: 0 28px 70px rgba(0, 0, 0, .48), 0 8px 22px rgba(0, 0, 0, .28);
+  --solid: #202127;
+  --solid-dark: #121316;
+  --sheet-tint: rgba(28, 29, 34, .8);
+  --scrim: rgba(0, 0, 0, .28);
+  /* Vibrant fills & labels on glass */
+  --fill: rgba(120, 120, 128, .32);
+  --fill-2: rgba(120, 120, 128, .22);
+  --fill-3: rgba(118, 118, 128, .16);
+  --fill-raised: rgba(255, 255, 255, .14);
+  --hairline: rgba(255, 255, 255, .1);
+  --hairline-strong: rgba(255, 255, 255, .16);
   --text: #f5f5f7;
-  --text-2: rgba(235, 235, 245, .64);
-  --text-3: rgba(235, 235, 245, .38);
+  --text-2: rgba(235, 235, 245, .66);
+  --text-3: rgba(235, 235, 245, .4);
   --accent: #0a84ff;
   --accent-text: #fff;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, .35), 0 4px 14px rgba(0, 0, 0, .28);
-  --shadow-2: 0 24px 60px rgba(0, 0, 0, .5), 0 4px 16px rgba(0, 0, 0, .3);
-  --glass-blur: saturate(180%) blur(28px);
   --route: #2f8bff;
   --route-casing: #0b4fc4;
   --route-alt: #7e8a9c;
   --route-alt-casing: #3a4250;
+  --hc-surface: #000;
+  --hc-border: #fff;
 }
 
 [data-theme="light"] {
   color-scheme: light;
   --map-bg: #eef0f3;
-  --surface: rgba(250, 250, 252, .8);
-  --surface-solid: #fafafc;
-  --surface-raised: rgba(255, 255, 255, .92);
-  --ink: rgba(24, 26, 31, .92);
-  --fill: rgba(120, 120, 128, .2);
-  --fill-2: rgba(120, 120, 128, .12);
-  --fill-3: rgba(118, 118, 128, .08);
+  --glass-tint: rgba(255, 255, 255, .5);
+  --glass-tint-lg: rgba(252, 252, 254, .62);
+  --glass-tint-dark: rgba(20, 22, 27, .74);
+  --glass-blur-sm: 3px;
+  --glass-blur-lg: 14px;
+  --glass-sat: 1.8;
+  --glass-bright: 1.08;
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, .45), rgba(255, 255, 255, 0) 50%);
+  --rim-hi: rgba(255, 255, 255, 1);
+  --rim-lo: rgba(255, 255, 255, .42);
+  --rim-mid: rgba(255, 255, 255, .75);
+  --glass-shadow-sm: 0 0 0 .5px rgba(0, 0, 0, .07), 0 8px 22px rgba(20, 30, 50, .16), 0 1px 4px rgba(20, 30, 50, .1);
+  --glass-shadow-lg: 0 0 0 .5px rgba(0, 0, 0, .06), 0 28px 70px rgba(20, 30, 50, .2), 0 8px 22px rgba(20, 30, 50, .1);
+  --solid: #f6f6f8;
+  --solid-dark: #1b1d22;
+  --sheet-tint: rgba(246, 246, 249, .84);
+  --scrim: rgba(10, 14, 22, .16);
+  --fill: rgba(120, 120, 128, .22);
+  --fill-2: rgba(120, 120, 128, .14);
+  --fill-3: rgba(118, 118, 128, .09);
+  --fill-raised: rgba(255, 255, 255, .78);
   --hairline: rgba(0, 0, 0, .08);
   --hairline-strong: rgba(0, 0, 0, .14);
   --text: #1d1d1f;
-  --text-2: rgba(60, 60, 67, .66);
-  --text-3: rgba(60, 60, 67, .38);
+  --text-2: rgba(60, 60, 67, .68);
+  --text-3: rgba(60, 60, 67, .4);
   --accent: #007aff;
   --accent-text: #fff;
   --blue: #007aff;
   --green: #28c840;
   --red: #ff3b30;
   --orange: #ff9500;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, .08), 0 4px 14px rgba(0, 0, 0, .08);
-  --shadow-2: 0 24px 60px rgba(15, 20, 30, .18), 0 4px 16px rgba(15, 20, 30, .08);
-  --glass-blur: saturate(180%) blur(28px);
   --route: #1a73ff;
   --route-casing: #0b4fc4;
   --route-alt: #9aa6b8;
   --route-alt-casing: #6c7788;
+  --hc-surface: #fff;
+  --hc-border: #000;
 }
