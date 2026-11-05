@@ -53,6 +53,7 @@
 .onboard .btn { margin-top: .75rem; }
 .onboard .link { display: block; margin: 1rem auto 0; color: #0a84ff; font-weight: 600; height: 2.75rem; }
 .onboard .err { color: #ff453a; font-weight: 600; margin-top: .75rem; font-size: .9375rem; }
+.onboard .ver { color: rgba(235, 235, 245, .3); font-size: .75rem; margin-top: .75rem; }
 
 /* Map services check */
 .svc { display: inline-flex; align-items: center; gap: .625rem; flex: none; }

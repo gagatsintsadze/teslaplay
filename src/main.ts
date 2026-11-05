@@ -1,6 +1,7 @@
 import { App } from './app';
 import { loadConfig } from './config';
 import { isTesla } from './core/env';
+import { watchForUpdates } from './core/update';
 import { bindMap } from './mapsync';
 import { mountControls } from './ui/controls';
 import { GlassEngine } from './ui/glass';
@@ -16,6 +17,7 @@ async function main() {
   if (isTesla) document.documentElement.classList.add('tesla');
   const app = new App(cfg);
   window.teslaplay = app; // handy for debugging from the console
+  watchForUpdates(() => app.state.navigating);
   // No Yandex key configured: go straight to the OpenStreetMap map — never ask the driver for keys.
   if (!cfg.demo && !cfg.yandexApiKey) app.useOsmMap('No Yandex JS API key configured');
 
@@ -57,7 +59,8 @@ async function main() {
       app.toast('Yandex map didn’t load — showing OpenStreetMap. Details in Settings → Map services.', 'info', 6500);
     } catch (e2) {
       console.error(e2);
-      showOnboarding(`${reason} The backup map couldn’t load either: ${(e2 as Error).message || e2}`);
+      console.warn('[map] Yandex:', reason);
+      showOnboarding(`Map error: ${(e2 as Error).message || e2}`);
       return;
     }
   }

@@ -1,5 +1,7 @@
 import { h } from '../core/dom';
 
+declare const __BUILD__: string;
+
 const APP_ICON = document.querySelector('.boot-mark svg') ? document.querySelector('.boot-mark')!.innerHTML : '';
 
 /**
@@ -14,6 +16,7 @@ export function showOnboarding(error?: string) {
     h('h1', null, 'Teslaplay'),
     h('p', null, 'The map couldn’t start. Check the internet connection and try again.'),
     error ? h('div.err', null, error) : null,
+    h('div.ver', null, `Build ${typeof __BUILD__ === 'string' ? __BUILD__ : ''}`),
     h('button.btn.btn-primary.btn-block.pressable', { onclick: retry }, 'Try again'),
     h('button.link', { onclick: demo }, 'Explore the demo instead'),
   );

@@ -15,12 +15,15 @@ const mode = args.has('--serve') ? 'serve' : args.has('--single') ? 'single' : '
 // Tesla's browser is Chromium; older firmware ships older engines, so we down-level syntax.
 const target = ['chrome79', 'es2019'];
 
+// Build id: lets a running page notice a newer deploy (GitHub Pages caches index.html ~10 min).
+const BUILD = mode === 'build' ? Date.now().toString(36) : 'dev';
+
 const common = {
   bundle: true,
   target,
   logLevel: 'info',
   legalComments: 'none',
-  define: { __DEV__: mode === 'serve' ? 'true' : 'false' },
+  define: { __DEV__: mode === 'serve' ? 'true' : 'false', __BUILD__: JSON.stringify(BUILD) },
 };
 
 const hash = (s) => createHash('sha256').update(s).digest('hex').slice(0, 10);
@@ -48,7 +51,9 @@ async function build() {
   writeFileSync(join(out, 'index.html'), template()
     .replace('assets/app.css', cssName)
     .replace('assets/app.js', jsName)
+    .replace('src="config.js"', `src="config.js?v=${BUILD}"`)
     .replace('<!-- dev-reload -->', ''));
+  writeFileSync(join(out, 'version.json'), JSON.stringify({ build: BUILD }));
   console.log(`\n  dist/ ready  (${(jsText.length / 1024).toFixed(0)} KB js, ${(cssText.length / 1024).toFixed(0)} KB css)\n`);
 }
 

@@ -7,6 +7,8 @@ import type { Settings } from '../types';
 import type { Material } from './glass';
 import { lensSupported } from './glass';
 import { icon } from './icons';
+
+declare const __BUILD__: string;
 import { segmented } from './segmented';
 import { activeProviders, type CheckResult, reportText, runServiceCheck } from '../services/diagnostics';
 
@@ -165,7 +167,7 @@ export function mountSettings(app: App, hud: HTMLElement) {
         }, s.demo ? 'Exit demo' : 'Open demo')),
       ),
       h('div.set-foot', null,
-        icon('info', 14), ' Teslaplay 0.1 · Maps, search and routing © Yandex · Weather & elevation: Open-Meteo · Chargers: Open Charge Map. ',
+        icon('info', 14), ` Teslaplay 0.1 (build ${typeof __BUILD__ === 'string' ? __BUILD__ : 'dev'}) · Maps, search and routing © Yandex · Weather & elevation: Open-Meteo · Chargers: Open Charge Map, OpenStreetMap. Backup map: MapLibre, © CARTO, © OpenStreetMap contributors. `,
         isTesla ? `Tesla browser detected${teslaFirmware ? ` (${teslaFirmware})` : ''}.` : '',
       ),
     );
