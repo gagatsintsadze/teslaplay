@@ -15,7 +15,7 @@ declare global {
  */
 export const AZIMUTH_SIGN = 1;
 
-const LOAD_TIMEOUT = 20000;
+const LOAD_TIMEOUT = 12000;
 let loading: Promise<any> | null = null;
 
 /** Inject the JS API v3 loader once and wait for `ymaps3.ready`. */

@@ -14,10 +14,10 @@ declare global { interface Window { teslaplay?: App } }
 async function main() {
   const cfg = loadConfig();
   if (isTesla) document.documentElement.classList.add('tesla');
-  if (!cfg.demo && !cfg.yandexApiKey) { showOnboarding(); return; }
-
   const app = new App(cfg);
   window.teslaplay = app; // handy for debugging from the console
+  // No Yandex key configured: go straight to the OpenStreetMap map — never ask the driver for keys.
+  if (!cfg.demo && !cfg.yandexApiKey) app.useOsmMap('No Yandex JS API key configured');
 
   const hud = document.getElementById('hud')!;
   const mapEl = document.getElementById('map')!;
@@ -47,8 +47,19 @@ async function main() {
     await app.start(mapEl);
   } catch (e) {
     console.error(e);
-    showOnboarding(loadErrorMessage(e));
-    return;
+    if (app.engine.kind === 'demo' || app.engine.kind === 'osm') { showOnboarding(String((e as Error).message || e)); return; }
+    // Yandex map didn't load (key not allowed on this site, blocked, timeout): carry on with
+    // the OpenStreetMap map. Search, Yandex routing, drive times and chargers keep working.
+    const reason = loadErrorMessage(e);
+    app.useOsmMap(reason);
+    try {
+      await app.start(mapEl);
+      app.toast('Yandex map didn’t load — showing OpenStreetMap. Details in Settings → Map services.', 'info', 6500);
+    } catch (e2) {
+      console.error(e2);
+      showOnboarding(`${reason} The backup map couldn’t load either: ${(e2 as Error).message || e2}`);
+      return;
+    }
   }
   bindMap(app);
   relight();

@@ -8,6 +8,7 @@ import { isDaylight, sunPosition } from './core/sun';
 import { DemoEngine } from './map/demo';
 import type { MapClick, MapEngine, Padding } from './map/engine';
 import { createPuck } from './map/markers';
+import { OsmEngine } from './map/osm';
 import { YandexEngine } from './map/yandex';
 import { FollowController, type FollowMode } from './nav/follow';
 import { NavigationSession } from './nav/session';
@@ -16,7 +17,7 @@ import { DemoChargers, DemoRouting, DemoSearch } from './services/demo';
 import { DEMO_BOUNDS, DEMO_START } from './services/demo-data';
 import { type EnergyModel, energyModel, evaluateStops, midpoint, planTrip, quickArrival, vehicleById } from './services/ev';
 import { LocationService } from './services/location';
-import { FallbackRouting, type RoutingService, YandexRouting } from './services/routing';
+import { FallbackRouting, type RoutingService, YandexRouterHttp, YandexRouting } from './services/routing';
 import { HttpGeocoder } from './services/geocoder';
 import { DriveTimes } from './services/matrix';
 import { OsmPlaces } from './services/osm';
@@ -79,13 +80,13 @@ export class App {
       this.geocoder = new HttpGeocoder(cfg.yandexGeocoderKey || cfg.yandexApiKey, cfg.mapLang, cfg.yandexApiKey);
       this.matrix = cfg.yandexMatrixKey ? new DriveTimes(cfg.yandexMatrixKey) : null;
       const ys = new YandexSearch(this.geocoder, this.osm);
-      ys.onDegraded = (what) => {
-        if (what === 'search') this.toast('Places from OpenStreetMap — a free Yandex Places key (Settings → Map data) adds Yandex business data.', 'info', 6000);
-      };
       this.search = ys;
       let warned = false;
-      this.routing = new FallbackRouting(new YandexRouting(), new OsrmRouting(), () => {
-        if (!warned) { warned = true; this.toast('Yandex routing isn’t enabled on this key — using OpenStreetMap routes.', 'warn', 6500); }
+      const chain = [{ name: 'Yandex (JS API)', router: new YandexRouting() as RoutingService }];
+      if (cfg.yandexRouterKey) chain.push({ name: 'Yandex Router API', router: new YandexRouterHttp(cfg.yandexRouterKey) });
+      chain.push({ name: 'OpenStreetMap (OSRM)', router: new OsrmRouting() });
+      this.routing = new FallbackRouting(chain, () => {
+        if (!warned) { warned = true; this.toast('Yandex routing didn’t answer — using OpenStreetMap routes.', 'warn', 6000); }
       });
     }
     this.chargers = demo ? new DemoChargers() : new LiveChargers(cfg.openChargeMapKey, this.search, this.osm!);
@@ -170,6 +171,16 @@ export class App {
     this.toast(this.state.material === 'frosted' ? 'Glass lensing paused to keep the map smooth' : 'Using solid panels to keep the map smooth', 'info', 4500);
   }
 
+  /** Why the Yandex map isn't in use (shown in Settings → Map services). */
+  mapFallbackReason = '';
+
+  /** Swap to the OpenStreetMap map (before `start`) — used when the Yandex map can't load. */
+  useOsmMap(reason: string) {
+    this.mapFallbackReason = reason;
+    this.engine = new OsmEngine();
+    this.store.set({ trafficAvailable: false });
+  }
+
   /** Best current position: GPS fix, else the map centre, else the boot centre. */
   here(): LngLat {
     const f = this.state.fix;
@@ -241,6 +252,7 @@ export class App {
   }
 
   async setTraffic(on: boolean) {
+    if (!this.engine.supportsTraffic) { this.store.set({ trafficAvailable: false }); return; }
     const ok = await this.engine.setTraffic(on);
     if (!ok && on) {
       this.store.set({ trafficAvailable: false });

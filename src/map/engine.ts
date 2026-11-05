@@ -30,9 +30,9 @@ export interface MapClick {
 
 export interface ViewRequest extends Partial<ViewState> { duration?: number }
 
-/** Everything the app needs from a map. Implemented by YandexEngine and the offline DemoEngine. */
+/** Everything the app needs from a map. Implemented by YandexEngine, OsmEngine (MapLibre fallback) and the offline DemoEngine. */
 export interface MapEngine {
-  readonly kind: 'yandex' | 'demo';
+  readonly kind: 'yandex' | 'osm' | 'demo';
   readonly supportsTraffic: boolean;
   init(container: HTMLElement, opts: { center: LngLat; zoom: number; theme: 'light' | 'dark' }): Promise<void>;
   setTheme(theme: 'light' | 'dark'): void;

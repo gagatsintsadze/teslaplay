@@ -68,3 +68,12 @@ svg { display: block; flex: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
 }
+
+/* OpenStreetMap backup map. MapLibre's stylesheet (loaded later) sets position: relative on the
+   container, which would collapse it to zero height. */
+#map.maplibregl-map { position: absolute; inset: 0; }
+/* keep the attribution clear of the control column */
+.maplibregl-ctrl-bottom-right { margin-right: calc(var(--edge) + var(--tap) + .25rem); }
+.maplibregl-ctrl-attrib.maplibregl-compact { background: var(--fill-raised); color: var(--text-2); }
+.maplibregl-ctrl-attrib a { color: inherit; }
+.maplibregl-canvas:focus { outline: none; }

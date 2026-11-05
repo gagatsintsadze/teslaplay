@@ -2,6 +2,7 @@ import type { App } from '../app';
 import type { LngLat } from '../types';
 import { HttpGeocoder } from './geocoder';
 import { OsrmRouting } from './osrm';
+import { YandexRouterHttp } from './routing';
 
 export interface CheckResult {
   id: string;
@@ -54,7 +55,8 @@ export async function runServiceCheck(app: App): Promise<CheckResult[]> {
   add('map', 'Yandex map', live ? async () => {
     if (!y) throw new Error('JS API not loaded');
     return `JS API v3 loaded${y.version ? ` (${y.version})` : ''} · key …${cfg.yandexApiKey.slice(-4)}`;
-  } : null, app.cfg.demo ? 'Demo mode — offline map' : 'Not loaded');
+  } : app.engine.kind === 'osm' ? async () => { throw new Error(app.mapFallbackReason || 'Not loaded'); } : null, 'Demo mode — offline map');
+  if (app.engine.kind === 'osm') add('osmmap', 'OpenStreetMap map', async () => 'Showing CARTO / OpenStreetMap tiles');
 
   add('suggest', 'Yandex Geosuggest', live && y ? async () => {
     const r: any[] = await y.suggest({ text: 'Rustaveli', limit: 1 });
@@ -66,7 +68,12 @@ export async function runServiceCheck(app: App): Promise<CheckResult[]> {
     return r && r.length ? `“${r[0].properties && r[0].properties.name}”` : 'Answered, no results';
   } : null);
 
-  add('router', 'Yandex routing', live && y ? async () => {
+  add('routerhttp', 'Yandex Router API', cfg.yandexRouterKey && !cfg.demo ? async () => {
+    const r = await new YandexRouterHttp(cfg.yandexRouterKey).route({ points: [here, near], avoidTolls: false });
+    return `${r[0].coords.length} points · ${Math.max(1, Math.round(r[0].duration / 60))} min with traffic`;
+  } : null);
+
+  add('router', 'Yandex routing (JS API)', live && y ? async () => {
     const r: any[] = await y.route({ points: [here, near], type: 'driving' });
     const f = r && r[0] && r[0].toRoute();
     const n = f && f.geometry && f.geometry.coordinates ? f.geometry.coordinates.length : 0;
@@ -136,10 +143,10 @@ export function activeProviders(app: App, results: CheckResult[]): { label: stri
   const ok = (id: string) => results.some((r) => r.id === id && r.ok);
   const has = (id: string) => results.some((r) => r.id === id);
   return [
-    { label: 'Map', value: ok('map') ? 'Yandex' : app.cfg.demo ? 'Demo' : 'Not loaded' },
+    { label: 'Map', value: ok('map') ? 'Yandex' : ok('osmmap') ? 'OpenStreetMap (backup)' : app.cfg.demo ? 'Demo' : 'Not loaded' },
     { label: 'Search as you type', value: ok('suggest') ? 'Yandex Geosuggest' : ok('search') ? 'Yandex Places' : [ok('geocoder') && 'Yandex Geocoder', ok('photon') && 'OpenStreetMap'].filter(Boolean).join(' + ') || 'Unavailable' },
     { label: 'Nearby places', value: (ok('search') ? 'Yandex Places' : ok('overpass') ? 'OpenStreetMap' : 'Unavailable') + (ok('matrix') ? ' · drive times by Yandex' : '') },
-    { label: 'Directions', value: ok('router') ? 'Yandex (live traffic)' : ok('osrm') ? 'OpenStreetMap (OSRM)' : 'Unavailable' },
+    { label: 'Directions', value: ok('router') || ok('routerhttp') ? 'Yandex (live traffic)' : ok('osrm') ? 'OpenStreetMap (OSRM)' : 'Unavailable' },
     { label: 'EV chargers', value: ok('ocm') ? 'Open Charge Map' : ok('overpass') ? 'OpenStreetMap' : ok('search') ? 'Yandex Places' : has('ocm') ? 'Unavailable' : 'Unavailable' },
   ];
 }

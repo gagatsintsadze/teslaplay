@@ -28,7 +28,7 @@ Edit **`public/config.js`** (copied to `dist/config.js`; you can change it on th
 
 | Key | Where | Used for | If it's missing |
 |---|---|---|---|
-| `yandexApiKey` (required) | Yandex Developer Dashboard → *JavaScript API and HTTP Geocoder* | map; also the HTTP Geocoder | — |
+| `yandexApiKey` | Yandex Developer Dashboard → *JavaScript API* | the Yandex map | the OpenStreetMap map (MapLibre + CARTO tiles), also used whenever Yandex refuses to load. The app never asks the driver for keys. |
 | `yandexSuggestKey` | *Geosuggest API* (free tier) | search-as-you-type | falls back to Places search, then to the Yandex Geocoder merged with OpenStreetMap (Photon) |
 | `yandexSearchKey` | *Places API* (free tier, 500 requests/day) | businesses, categories (cafés, parking…) | OpenStreetMap: Photon for search, Overpass for nearby categories |
 | `yandexRouterKey` | *Router API* | driving routes with live traffic (`ymaps3.route`) | falls back to OpenStreetMap routing (public OSRM server) |
@@ -91,6 +91,7 @@ src/
   map/
     engine.ts        MapEngine interface (the only thing the app knows about maps)
     yandex.ts        Yandex JS API v3 implementation (YMap, markers, features, traffic, listener)
+    osm.ts           OpenStreetMap backup map (self-hosted MapLibre GL + CARTO basemaps, 3D buildings)
     demo.ts          offline Web-Mercator engine used by demo mode
     markers.ts       pins, charger badges, the user puck
     gestures.ts      detects real user pans/zooms → drops out of follow mode
@@ -99,7 +100,7 @@ src/
     follow.ts        60 fps puck interpolation between 1 Hz GPS fixes + follow / heading-up camera
   services/
     search.ts        ymaps3.suggest / ymaps3.search (+ reverse geocoding for street names)
-    routing.ts       ymaps3.route → RouteResult (steps, alternatives, waypoint distances)
+    routing.ts       ymaps3.route / Router API over HTTP → RouteResult; router chain with OSRM last
     maneuvers.ts     builds turn instructions from route geometry (see below)
     ev.ts            vehicle presets, energy model, charging-stop planner
     chargers.ts      Open Charge Map along-route search, Yandex fallback
