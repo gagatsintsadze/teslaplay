@@ -3,14 +3,18 @@ import type { LngLat } from '../types';
 
 /**
  * Lane-level road details from OpenStreetMap: lane counts, painted turn lanes (`turn:lanes`),
- * speed limits (`maxspeed`) and traffic lights. Fetched from Overpass one zoom-14 tile
- * (~1.8 km square in Georgia) at a time and kept in IndexedDB for 30 days, because Overpass
- * takes 15–30 s per tile — the map shows the details as soon as a tile is in, and instantly
- * on every later drive through the same area.
+ * speed limits (`maxspeed`) and traffic lights, one zoom-14 tile (~1.8 km square in Georgia) at a time.
+ *
+ * Source, in order:
+ *  1. Pre-built tiles for the whole country (`roads-data` branch, built weekly from the Geofabrik
+ *     extract by .github/workflows/roads.yml) — a few KB each, instant, no rate limits
+ *  2. Overpass, only when those aren't published yet (slow and rate-limited: 15–30 s per tile, 429s)
+ * Tiles are kept in IndexedDB, so a known area shows instantly even offline.
  */
 
 export const DETAIL_Z = 14;
 const TTL = 30 * 864e5;
+export const ROADS_DATA_URL = 'https://raw.githubusercontent.com/gagatsintsadze/teslaplay/roads-data/';
 const ENDPOINTS = ['https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass-api.de/api/interpreter'];
 const HIGHWAYS = '^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street)(_link)?$';
 const KEYS = '^(lanes|lanes:(forward|backward)|turn:lanes(:forward|:backward)?|maxspeed(:forward|:backward)?)$';
@@ -19,7 +23,7 @@ const KEEP = ['highway', 'lanes', 'lanes:forward', 'lanes:backward', 'oneway', '
   'turn:lanes:backward', 'maxspeed', 'maxspeed:forward', 'maxspeed:backward', 'divider', 'bridge', 'tunnel', 'layer'];
 
 export interface RoadWay { id: number; g: LngLat[]; t: Record<string, string> }
-export interface RoadTile { key: string; ways: RoadWay[]; signals: LngLat[]; time: number }
+export interface RoadTile { key: string; ways: RoadWay[]; signals: LngLat[]; time: number; /** Build stamp of the pre-built dataset it came from. */ built?: string }
 
 export const tileKey = (x: number, y: number) => `${DETAIL_Z}/${x}/${y}`;
 
@@ -76,6 +80,20 @@ export class RoadDetails {
   private failed = new Map<string, number>();
   private listeners: ((t: RoadTile) => void)[] = [];
   private endpoint = 0;
+  /** The pre-built dataset's build stamp, or null when it isn't published (→ Overpass). */
+  private meta: Promise<string | null>;
+  /** Where tiles come from right now (Settings → Map services). */
+  source = 'loading';
+
+  constructor(private dataUrl = ROADS_DATA_URL) {
+    this.meta = fetch(`${dataUrl}meta.json`, { cache: 'no-cache' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((m) => {
+        const built = m && typeof m.built === 'string' ? m.built : null;
+        this.source = built ? `pre-built (OpenStreetMap ${built.slice(0, 10)})` : 'Overpass (live)';
+        return built;
+      }, () => { this.source = 'Overpass (live)'; return null; });
+  }
 
   onTile(cb: (t: RoadTile) => void) { this.listeners.push(cb); }
 
@@ -116,8 +134,10 @@ export class RoadDetails {
     return out;
   }
 
+  private parallel = 2;
+
   private pump() {
-    while (this.inflight.size < 2 && this.queue.length) {
+    while (this.inflight.size < this.parallel && this.queue.length) {
       const job = this.queue.shift()!;
       this.inflight.add(job.key);
       this.load(job.x, job.y).then((t) => {
@@ -133,6 +153,27 @@ export class RoadDetails {
   private async load(x: number, y: number): Promise<RoadTile> {
     const key = tileKey(x, y);
     const cached = await idbGet(key);
+    const built = await this.meta;
+    if (built) {
+      this.parallel = 6; // static files: no need to be gentle
+      if (cached && cached.built === built) return cached;
+      try {
+        const r = await fetch(`${this.dataUrl}${DETAIL_Z}/${x}/${y}.json`);
+        if (r.status === 404) { const empty: RoadTile = { key, ways: [], signals: [], time: Date.now(), built }; idbPut(empty); return empty; }
+        if (!r.ok) throw new Error(`roads ${r.status}`);
+        const j = await r.json();
+        const tile: RoadTile = {
+          key, built, time: Date.now(),
+          ways: (j.w || []).map((w: any[]) => ({ id: w[0], t: w[1], g: w[2] })),
+          signals: j.s || [],
+        };
+        idbPut(tile);
+        return tile;
+      } catch (e) {
+        if (cached) return cached;
+        throw e;
+      }
+    }
     if (cached && Date.now() - cached.time < TTL) return cached;
     const [s, w, n, e] = tileBbox(x, y);
     const q = `[out:json][timeout:60][bbox:${s.toFixed(5)},${w.toFixed(5)},${n.toFixed(5)},${e.toFixed(5)}];`

@@ -240,31 +240,31 @@ export class OsmEngine implements MapEngine {
     map.addSource('tp-signals', { type: 'geojson', data: empty });
     const units = (e: any): any => ['interpolate', ['exponential', 2], ['zoom'], 15, ['*', e, 2 ** 15 / 116860], 20, ['*', e, 2 ** 20 / 116860]];
     const markW: any = ['interpolate', ['exponential', 2], ['zoom'], 16, 0.7, 18, 1.5, 20, 5];
-    const fade: any = ['interpolate', ['linear'], ['zoom'], 16.2, 0, 16.8, 1];
+    const fade: any = ['interpolate', ['linear'], ['zoom'], 15.6, 0, 16.2, 1];
     for (const br of [0, 1]) {
       const before = br ? (map.getLayer('oneway') ? 'oneway' : undefined) : (map.getLayer('rail') ? 'rail' : undefined);
       const sfx = br ? '-br' : '';
       const f = (k: string): any => ['all', ['==', ['get', 'k'], k], ['==', ['get', 'br'], br]];
-      map.addLayer({ id: `tp-lane-kerb${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 16.2, filter: f('surf'), layout: { 'line-join': 'round', 'line-cap': 'round' },
+      map.addLayer({ id: `tp-lane-kerb${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.6, filter: f('surf'), layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: { 'line-color': br ? P.bridgeKerb : P.kerb, 'line-width': units(['+', ['get', 'w'], 3.5]), 'line-offset': units(['get', 'o']), 'line-opacity': fade } }, before);
-      map.addLayer({ id: `tp-lane-surf${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 16.2, filter: f('surf'), layout: { 'line-join': 'round', 'line-cap': 'round' },
+      map.addLayer({ id: `tp-lane-surf${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.6, filter: f('surf'), layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: { 'line-color': ['match', ['get', 'tone'], 'major', P.asphalt, P.asphaltMinor], 'line-width': units(['get', 'w']), 'line-offset': units(['get', 'o']), 'line-opacity': fade } }, before);
-      map.addLayer({ id: `tp-lane-dash${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 16.4, filter: f('dash'),
+      map.addLayer({ id: `tp-lane-dash${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.8, filter: f('dash'),
         paint: { 'line-color': P.marking, 'line-width': markW, 'line-offset': units(['get', 'o']), 'line-dasharray': [9, 18], 'line-opacity': fade } }, before);
-      map.addLayer({ id: `tp-lane-solid${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 16.4, filter: ['all', ['match', ['get', 'k'], ['solid', 'edge'], true, false], ['==', ['get', 'br'], br]], layout: { 'line-join': 'round' },
-        paint: { 'line-color': P.marking, 'line-width': markW, 'line-offset': units(['get', 'o']), 'line-opacity': ['interpolate', ['linear'], ['zoom'], 16.2, 0, 16.8, 0.9] } }, before);
-      map.addLayer({ id: `tp-lane-double${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 16.4, filter: f('double'), layout: { 'line-join': 'round' },
+      map.addLayer({ id: `tp-lane-solid${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.8, filter: ['all', ['match', ['get', 'k'], ['solid', 'edge'], true, false], ['==', ['get', 'br'], br]], layout: { 'line-join': 'round' },
+        paint: { 'line-color': P.marking, 'line-width': markW, 'line-offset': units(['get', 'o']), 'line-opacity': ['interpolate', ['linear'], ['zoom'], 15.6, 0, 16.2, 0.9] } }, before);
+      map.addLayer({ id: `tp-lane-double${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.8, filter: f('double'), layout: { 'line-join': 'round' },
         paint: { 'line-color': P.marking, 'line-width': markW, 'line-gap-width': units(0.9), 'line-offset': units(['get', 'o']), 'line-opacity': fade } }, before);
     }
     map.addLayer({
-      id: 'tp-lane-arrows', type: 'symbol', source: 'tp-lane-arrows', minzoom: 16.6,
+      id: 'tp-lane-arrows', type: 'symbol', source: 'tp-lane-arrows', minzoom: 16.2,
       layout: {
         'icon-image': ['get', 'icon'], 'icon-rotate': ['get', 'rot'], 'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map',
         'icon-allow-overlap': true, 'icon-ignore-placement': true,
         // 40 px wide image → 90 % of the lane's drawn width (twice as long as wide).
-        'icon-size': ['interpolate', ['exponential', 2], ['zoom'], 16.6, ['*', ['get', 'w'], (0.9 * 2 ** 16.6) / 116860 / 40], 20, ['*', ['get', 'w'], (0.9 * 2 ** 20) / 116860 / 40]],
+        'icon-size': ['interpolate', ['exponential', 2], ['zoom'], 16.2, ['*', ['get', 'w'], (0.9 * 2 ** 16.2) / 116860 / 40], 20, ['*', ['get', 'w'], (0.9 * 2 ** 20) / 116860 / 40]],
       },
-      paint: { 'icon-opacity': ['interpolate', ['linear'], ['zoom'], 16.6, 0, 17.1, 0.92] },
+      paint: { 'icon-opacity': ['interpolate', ['linear'], ['zoom'], 16.2, 0, 16.7, 0.92] },
     }, map.getLayer('tp-buildings') ? 'tp-buildings' : undefined); // over the route line, like painted arrows seen through it
     const sig = signalImage();
     if (sig && !map.hasImage('tp-signal')) map.addImage('tp-signal', sig, { pixelRatio: 2 });

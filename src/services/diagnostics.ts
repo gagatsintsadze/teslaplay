@@ -2,6 +2,7 @@ import type { App } from '../app';
 import type { LngLat } from '../types';
 import { checkMapboxToken } from './mapbox';
 import { OsrmRouting } from './osrm';
+import { ROADS_DATA_URL } from './roads';
 
 export interface CheckResult {
   id: string;
@@ -79,6 +80,13 @@ export async function runServiceCheck(app: App): Promise<CheckResult[]> {
     return `${Math.round(t.duration / 60)} min to a point ${(t.distance / 1000).toFixed(1)} km away`;
   } : null, 'No Mapbox token — nearby results sorted by distance');
 
+  add('roads', 'Lanes, speed limits & traffic lights', app.roads ? async () => {
+    const r = await fetch(`${ROADS_DATA_URL}meta.json`, { cache: 'no-cache' });
+    if (!r.ok) throw new Error(`Pre-built data not published (HTTP ${r.status}) — using Overpass, slow`);
+    const m = await r.json();
+    return `${m.tiles} areas, ${m.ways} roads, ${m.signals} traffic lights · OpenStreetMap ${String(m.built).slice(0, 10)}`;
+  } : null);
+
   add('osrm', 'OpenStreetMap routing', async () => {
     const r = await new OsrmRouting().route({ points: [here, near], avoidTolls: false });
     return `${r.length} route${r.length === 1 ? '' : 's'} · ${Math.round(r[0].duration / 60)} min`;
@@ -127,6 +135,7 @@ export function activeProviders(app: App, results: CheckResult[]): { label: stri
     { label: 'Map', value: app.cfg.demo ? 'Demo' : ok('map') ? 'OpenStreetMap (Drive style)' : 'Not loading' },
     { label: 'Directions', value: ok('mapbox') ? 'Mapbox — live traffic' : ok('osrm') ? 'OpenStreetMap (OSRM) — no traffic' : 'Unavailable' },
     { label: 'Traffic on the map', value: ok('traffic') ? 'Mapbox' : 'Off' },
+    { label: 'Lane details', value: ok('roads') ? 'Pre-built OpenStreetMap data' : app.roads ? 'Overpass (live, slow)' : 'Off' },
     { label: 'Search', value: ok('photon') ? 'OpenStreetMap (Photon)' : 'Unavailable' },
     { label: 'Nearby places', value: (ok('overpass') ? 'OpenStreetMap' : 'Unavailable') + (ok('matrix') ? ' · drive times by Mapbox' : '') },
     { label: 'EV chargers', value: ok('ocm') ? 'Open Charge Map' : ok('overpass') ? 'OpenStreetMap' : has('ocm') ? 'Unavailable' : 'Unavailable' },
