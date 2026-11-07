@@ -1,4 +1,5 @@
 import { angleDiff } from '../core/geo';
+import { turnSet } from '../map/arrows';
 import type { LngLat, ManeuverType, RouteResult, TrafficSpan } from '../types';
 import { buildRoute, type RawManeuver, type RawStep, type RouteRequest, type RoutingService } from './routing';
 import type { DriveTime } from './matrix';
@@ -57,7 +58,7 @@ export class MapboxRouting implements RoutingService {
       geometries: 'geojson',
       overview: 'full',
       steps: 'true',
-      annotations: 'congestion',
+      annotations: 'congestion,maxspeed',
       language: this.lang,
     });
     if (req.avoidTolls) qs.set('exclude', 'toll');
@@ -73,13 +74,22 @@ function toRoute(rt: any, req: RouteRequest): RouteResult {
   const maneuvers: RawManeuver[] = [];
   let tolls = false;
   const congestion: number[] = [];
+  const maxspeed: (number | null)[] = [];
+  const signals: LngLat[] = [];
   for (const leg of rt.legs || []) {
     const ann = leg.annotation && leg.annotation.congestion;
     if (Array.isArray(ann)) for (const c of ann) congestion.push(LEVEL[c] || 0);
+    const ms = leg.annotation && leg.annotation.maxspeed;
+    if (Array.isArray(ms)) for (const v of ms) maxspeed.push(v && typeof v.speed === 'number' ? Math.round(v.speed * (v.unit === 'mph' ? 1.609 : 1)) : null);
     for (const s of leg.steps || []) {
       const name = s.name || s.ref || '';
       steps.push({ coords: s.geometry.coordinates as LngLat[], distance: s.distance, duration: s.duration, name });
-      if ((s.intersections || []).some((x: any) => Array.isArray(x.classes) && x.classes.includes('toll'))) tolls = true;
+      const xs: any[] = s.intersections || [];
+      if (xs.some((x: any) => Array.isArray(x.classes) && x.classes.includes('toll'))) tolls = true;
+      for (const x of xs) if (x.traffic_signal && Array.isArray(x.location)) signals.push(x.location as LngLat);
+      // Lanes at the junction where this step's maneuver happens, as Mapbox reports them.
+      const rawLanes: any[] = (xs[0] && xs[0].lanes) || [];
+      const lanes = rawLanes.length > 1 ? rawLanes.map((l: any) => ({ dirs: turnSet(l.indications || []), valid: !!l.valid })) : undefined;
       const m = s.maneuver || {};
       if (SILENT.has(m.type)) continue;
       const type = MODIFIER[m.modifier];
@@ -90,11 +100,13 @@ function toRoute(rt: any, req: RouteRequest): RouteResult {
         const a = typeof m.bearing_before === 'number' && typeof m.bearing_after === 'number' ? angleDiff(m.bearing_before, m.bearing_after) : NaN;
         if (isFinite(a) && Math.sign(a) === Math.sign(angle)) angle = a;
       }
-      maneuvers.push({ coord: m.location as LngLat, type, angle, street: name || undefined, instruction: m.instruction });
+      maneuvers.push({ coord: m.location as LngLat, type, angle, street: name || undefined, instruction: m.instruction, lanes });
     }
   }
   const r = buildRoute(coords, rt.distance, rt.duration, tolls, steps, req, maneuvers);
   if (typeof rt.duration_typical === 'number' && rt.duration_typical > 0) r.durationTypical = rt.duration_typical;
+  if (maxspeed.length === coords.length - 1 && maxspeed.some((v) => v !== null)) r.maxspeed = maxspeed;
+  if (signals.length) r.signals = signals;
   if (congestion.length === coords.length - 1) {
     r.trafficAware = true;
     r.traffic = trafficSpans(congestion, r.cum);

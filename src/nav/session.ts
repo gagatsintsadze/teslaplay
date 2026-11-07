@@ -23,6 +23,8 @@ export interface NavSnapshot {
   arrivalSoc: number | null;
   socNow: number | null;
   nextStop: { name: string; distance: number } | null;
+  /** Posted limit where the car is, km/h (router data; the app may fill it from map data). */
+  speedLimit: number | null;
 }
 
 export interface SessionDeps {
@@ -161,6 +163,7 @@ export class NavigationSession {
       arrivalSoc,
       socNow,
       nextStop,
+      speedLimit: this.route.maxspeed ? this.route.maxspeed[Math.min(this.route.maxspeed.length - 1, pointAt(this.route.coords, this.route.cum, this.progress).seg)] ?? null : null,
     });
   }
 

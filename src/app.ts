@@ -21,6 +21,8 @@ import { MapboxMatrix, MapboxRouting } from './services/mapbox';
 import { OsmPlaces } from './services/osm';
 import { OsrmRouting } from './services/osrm';
 import { OsmSearch, type SearchService } from './services/search';
+import { RoadDetails } from './services/roads';
+import { buildLanes } from './map/lanes';
 import { Voice } from './services/voice';
 import { WeatherService } from './services/weather';
 import { type AppState, initialState } from './state';
@@ -42,6 +44,8 @@ export class App {
   weather: WeatherService;
   osm: OsmPlaces | null = null;
   matrix: MapboxMatrix | null = null;
+  /** Lane-level OpenStreetMap detail (lanes, painted arrows, traffic lights, speed limits). */
+  roads: RoadDetails | null = null;
   location = new LocationService();
   voice = new Voice();
   puck = createPuck();
@@ -78,6 +82,7 @@ export class App {
     } else {
       this.osm = new OsmPlaces(cfg.mapLang);
       this.search = new OsmSearch(this.osm);
+      this.roads = new RoadDetails();
       // Mapbox (live traffic) when a token is set; OpenStreetMap routing (OSRM) always behind it.
       const chain: NamedRouter[] = [];
       if (cfg.mapboxToken) {
@@ -114,7 +119,14 @@ export class App {
     // 3D on: open tilted so buildings stand up (the engine caps it; the demo map stays flat).
     if (this.follow.exploreTilt) this.engine.setView({ tilt: this.follow.exploreTilt, zoom: Math.max(16.2, this.engine.getView().zoom), duration: 1200 });
     this.engine.onUserGesture(() => { if (this.follow.mode !== 'none') this.follow.setMode('none'); });
-    this.engine.onViewChange((v) => { if (Math.abs(v.azimuth - this.state.azimuth) > 0.5) this.store.set({ azimuth: v.azimuth }); });
+    this.engine.onViewChange((v) => {
+      if (Math.abs(v.azimuth - this.state.azimuth) > 0.5) this.store.set({ azimuth: v.azimuth });
+      this.roadsForView(v.center, v.zoom);
+    });
+    if (this.roads && this.engine.setRoadDetails) {
+      this.roads.onTile(() => this.renderRoads(true));
+      this.store.select((s) => [s.navRoute, s.routes, s.routeIndex], () => this.renderRoads(true), { equals: shallowEqualArray });
+    }
     this.engine.onClick((e) => this.onMapTap(e));
     this.engine.onLongPress((e) => this.dropPin(e.coord));
 
@@ -180,6 +192,40 @@ export class App {
     this.materialStep++;
     this.applySettings(this.state.settings, false);
     this.toast(this.state.material === 'frosted' ? 'Glass lensing paused to keep the map smooth' : 'Using solid panels to keep the map smooth', 'info', 4500);
+  }
+
+  // ───────────────────────── lane-level road detail ─────────────────────────
+  private roadsCenter: LngLat | null = null;
+  private roadsKey = '';
+  private roadsTimer = 0;
+
+  /** Load lane detail around the view once zoomed in to street level (debounced). */
+  private roadsForView(center: LngLat, zoom: number) {
+    if (!this.roads || zoom < 15) return;
+    this.roadsCenter = center;
+    if (this.roadsTimer) return; // throttle: the view changes every frame while driving
+    this.roadsTimer = window.setTimeout(() => {
+      this.roadsTimer = 0;
+      const c = this.roadsCenter!;
+      this.roads!.request(this.roads!.around(c), 0);
+      this.renderRoads(false);
+    }, 600);
+  }
+
+  /** Draw the loaded tiles around the view (+ traffic lights on the active route). */
+  private renderRoads(force: boolean) {
+    const roads = this.roads;
+    if (!roads || !this.engine.setRoadDetails || !this.roadsCenter) return;
+    const keys = roads.around(this.roadsCenter).map(([x, y]) => `14/${x}/${y}`).filter((k) => roads.tiles.has(k));
+    const s = this.state;
+    const route = s.navigating ? s.navRoute : s.routes[s.routeIndex];
+    const sig = `${keys.join(' ')}|${route ? route.id : ''}`;
+    if (!force && sig === this.roadsKey) return;
+    this.roadsKey = sig;
+    const tiles = keys.map((k) => roads.tiles.get(k)!);
+    const ways = tiles.flatMap((t) => t.ways);
+    const signals = tiles.flatMap((t) => t.signals).concat(route && route.signals ? route.signals : []);
+    this.engine.setRoadDetails(buildLanes(ways, signals));
   }
 
   /** Best current position: GPS fix, else the map centre, else the boot centre. */
@@ -557,11 +603,17 @@ export class App {
       destinationName: dest.name,
       usableKWh: s.settings.usableKWh || v.usableKWh,
       reverse: (c) => this.search.reverse(c).then((r) => (r ? r.street || r.name : null)),
-      onSnapshot: (snap) => { this.store.set({ nav: snap }); this.follow.setManeuverDistance(snap.distToManeuver); },
+      onSnapshot: (snap) => {
+        // Router knows no limit here: fall back to OpenStreetMap's maxspeed for the road we're on.
+        if (snap.speedLimit === null && this.roads && this.state.fix) snap.speedLimit = this.roads.speedLimitAt(this.follow.position || this.state.fix.coord, this.follow.displayHeading);
+        this.store.set({ nav: snap });
+        this.follow.setManeuverDistance(snap.distToManeuver);
+      },
       onReroute: (from) => this.reroute(from),
       onArrive: () => this.store.set({ arrived: true }),
     });
     this.store.set({ navigating: true, navRoute: route, nav: null, arrived: false, tripOpen: false, rerouting: false });
+    if (this.roads) this.roads.request(this.roads.along(route.coords), 1);
     this.follow.setNavigation(route);
     this.follow.tilt3D = s.settings.view3D;
     this.follow.setMode('course');
@@ -623,6 +675,7 @@ export class App {
     const plan2 = plan ? evaluateStops(r, model, remainingStops, soc, v, s.settings, { tempC: plan.tempC }) : null;
     sess.setRoute(r, plan2, model);
     this.follow.setNavigation(r);
+    if (this.roads) this.roads.request(this.roads.along(r.coords), 1);
     this.store.set({ navRoute: r, rerouting: false, plan: plan2 });
     if (restartSim && this.state.simulating) this.location.simulate(r, this.state.simSpeed);
   }

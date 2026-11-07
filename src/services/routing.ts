@@ -73,7 +73,7 @@ export function buildRoute(
 export interface RawStep { coords: LngLat[]; distance?: number; duration?: number; name?: string }
 
 /** A maneuver as the router describes it, located by coordinate. */
-export interface RawManeuver { coord: LngLat; type: ManeuverType; angle: number; street?: string; instruction?: string }
+export interface RawManeuver { coord: LngLat; type: ManeuverType; angle: number; street?: string; instruction?: string; lanes?: Maneuver['lanes'] }
 
 function placeManeuvers(coords: LngLat[], cum: number[], raw: RawManeuver[], stops: { at: number; label: string }[]): Maneuver[] {
   const total = cum[cum.length - 1];
@@ -83,7 +83,7 @@ function placeManeuvers(coords: LngLat[], cum: number[], raw: RawManeuver[], sto
     const p = projectOnRoute(coords, cum, m.coord, from, from + 50000);
     if (!p || p.d < 5 || p.d > total - 5) continue;
     from = p.d;
-    out.push({ type: m.type, angle: m.angle, at: p.d, coord: m.coord, street: m.street, instruction: m.instruction });
+    out.push({ type: m.type, angle: m.angle, at: p.d, coord: m.coord, street: m.street, instruction: m.instruction, lanes: m.lanes });
   }
   for (const w of stops) out.push({ type: 'waypoint', angle: 0, at: w.at, coord: pointAt(coords, cum, w.at).coord, label: w.label });
   out.sort((a, b) => a.at - b.at);

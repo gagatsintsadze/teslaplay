@@ -1,3 +1,4 @@
+import { laneSvg, type TurnDir } from '../map/arrows';
 import type { App } from '../app';
 import { h, mount, setText, toggleClass } from '../core/dom';
 import { distanceParts, durationParts, formatClock, formatDistance } from '../core/format';
@@ -23,7 +24,8 @@ export function mountNavHud(app: App, hud: HTMLElement) {
   const thenGlyph = h('span');
   const thenText = h('span');
   const thenRow = h('div.mv-then', null, h('span', null, 'Then'), thenGlyph, thenText);
-  const banner = h('section.maneuver.glass.glass-lg.glass-dark', { 'aria-live': 'assertive' }, main, thenRow);
+  const lanesRow = h('div.mv-lanes.hidden', { 'aria-hidden': 'true' });
+  const banner = h('section.maneuver.glass.glass-lg.glass-dark', { 'aria-live': 'assertive' }, main, lanesRow, thenRow);
 
   // ── trip summary ──
   const arrV = h('div.trip-v.arr.num');
@@ -93,6 +95,16 @@ export function mountNavHud(app: App, hud: HTMLElement) {
       main.classList.remove('mv-swap');
       void main.offsetWidth;
       main.classList.add('mv-swap');
+    }
+    // Lane guidance (Mapbox): which lanes lead the right way at the coming junction.
+    const lanes = m.lanes && m.lanes.length > 1 && n.distToManeuver < 1500 ? m.lanes : null;
+    const laneSig = lanes ? `${n.routeId}:${n.maneuverIndex}` : '';
+    if (lanesRow.dataset.sig !== laneSig) {
+      lanesRow.dataset.sig = laneSig;
+      toggleClass(lanesRow, 'hidden', !lanes);
+      if (lanes) {
+        mount(lanesRow, ...lanes.map((l) => h('div.mv-lane', { class: { ok: l.valid }, html: laneSvg(l.dirs as TurnDir[], l.valid ? '#ffffff' : 'rgba(255,255,255,.32)') })));
+      }
     }
     const [dv, du] = distanceParts(n.distToManeuver);
     setText(distV, dv);

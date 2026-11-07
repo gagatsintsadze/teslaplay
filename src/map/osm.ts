@@ -2,7 +2,8 @@ import type { LngLat, LngLatBounds } from '../types';
 import type { MapClick, MapEngine, MarkerSpec, Padding, RouteLine, ViewRequest, ViewState } from './engine';
 import { attachGestureWatcher } from './gestures';
 import { trafficTilesUrl } from '../services/mapbox';
-import { buildStyle } from './style';
+import { arrowImage, signalImage, type TurnDir } from './arrows';
+import { buildStyle, PALETTES } from './style';
 
 declare global {
   interface Window { maplibregl?: any }
@@ -97,6 +98,7 @@ export class OsmEngine implements MapEngine {
   private maneuver: LngLat[] | null = null;
 
   private trafficOn = false;
+  private details: { lines: any; arrows: any; signals: any } | null = null;
   private trafficTimer = 0;
   /** Called when Mapbox refuses the traffic tiles (bad or restricted token). */
   onTrafficError: ((message: string) => void) | null = null;
@@ -135,6 +137,12 @@ export class OsmEngine implements MapEngine {
     });
     this.decorateStyle();
     map.on('style.load', () => this.decorateStyle());
+    map.on('styleimagemissing', (e: any) => {
+      const id: string = e && e.id;
+      if (!id || !id.startsWith('ta:') || map.hasImage(id)) return;
+      const img = arrowImage(id.slice(3).split(';') as TurnDir[], PALETTES[this.theme].marking);
+      if (img) map.addImage(id, img, { pixelRatio: 2 });
+    });
     map.on('move', () => this.queueView());
     map.on('click', (e: any) => this.handleClick(e, this.clickCbs));
     map.on('contextmenu', (e: any) => this.handleClick(e, this.longCbs));
@@ -211,9 +219,80 @@ export class OsmEngine implements MapEngine {
       map.addLayer({ id: 'tp-mv-head-casing', type: 'line', source: 'tp-mv', filter: ['==', ['geometry-type'], 'Polygon'], layout: { 'line-join': 'round' }, paint: { 'line-color': '#0b4fc4', 'line-width': w(1, 2.5) } });
       map.addLayer({ id: 'tp-mv-head', type: 'fill', source: 'tp-mv', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#ffffff' } });
     }
+    this.addRoadDetailLayers();
     this.applyTraffic();
     this.paintRoutes();
     this.applyNavOverlay();
+  }
+
+  /**
+   * Lane-level detail from OpenStreetMap (see map/lanes.ts): lane-width carriageways, lane lines,
+   * painted turn arrows and traffic lights. Drawn just above the style's own roads — ground-level
+   * roads before the rail/bridge layers, bridges after them — so bridges still cross on top.
+   */
+  private addRoadDetailLayers() {
+    const map = this.map;
+    if (map.getSource('tp-lanes')) { this.applyRoadDetails(); return; }
+    const P = PALETTES[this.theme];
+    const empty = { type: 'FeatureCollection', features: [] };
+    map.addSource('tp-lanes', { type: 'geojson', data: empty, tolerance: 0.2 });
+    map.addSource('tp-lane-arrows', { type: 'geojson', data: empty });
+    map.addSource('tp-signals', { type: 'geojson', data: empty });
+    const units = (e: any): any => ['interpolate', ['exponential', 2], ['zoom'], 15, ['*', e, 2 ** 15 / 116860], 20, ['*', e, 2 ** 20 / 116860]];
+    const markW: any = ['interpolate', ['exponential', 2], ['zoom'], 16, 0.7, 18, 1.5, 20, 5];
+    const fade: any = ['interpolate', ['linear'], ['zoom'], 16.2, 0, 16.8, 1];
+    for (const br of [0, 1]) {
+      const before = br ? (map.getLayer('oneway') ? 'oneway' : undefined) : (map.getLayer('rail') ? 'rail' : undefined);
+      const sfx = br ? '-br' : '';
+      const f = (k: string): any => ['all', ['==', ['get', 'k'], k], ['==', ['get', 'br'], br]];
+      map.addLayer({ id: `tp-lane-kerb${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 16.2, filter: f('surf'), layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': br ? P.bridgeKerb : P.kerb, 'line-width': units(['+', ['get', 'w'], 3.5]), 'line-offset': units(['get', 'o']), 'line-opacity': fade } }, before);
+      map.addLayer({ id: `tp-lane-surf${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 16.2, filter: f('surf'), layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': ['match', ['get', 'tone'], 'major', P.asphalt, P.asphaltMinor], 'line-width': units(['get', 'w']), 'line-offset': units(['get', 'o']), 'line-opacity': fade } }, before);
+      map.addLayer({ id: `tp-lane-dash${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 16.4, filter: f('dash'),
+        paint: { 'line-color': P.marking, 'line-width': markW, 'line-offset': units(['get', 'o']), 'line-dasharray': [9, 18], 'line-opacity': fade } }, before);
+      map.addLayer({ id: `tp-lane-solid${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 16.4, filter: ['all', ['match', ['get', 'k'], ['solid', 'edge'], true, false], ['==', ['get', 'br'], br]], layout: { 'line-join': 'round' },
+        paint: { 'line-color': P.marking, 'line-width': markW, 'line-offset': units(['get', 'o']), 'line-opacity': ['interpolate', ['linear'], ['zoom'], 16.2, 0, 16.8, 0.9] } }, before);
+      map.addLayer({ id: `tp-lane-double${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 16.4, filter: f('double'), layout: { 'line-join': 'round' },
+        paint: { 'line-color': P.marking, 'line-width': markW, 'line-gap-width': units(0.9), 'line-offset': units(['get', 'o']), 'line-opacity': fade } }, before);
+    }
+    map.addLayer({
+      id: 'tp-lane-arrows', type: 'symbol', source: 'tp-lane-arrows', minzoom: 16.6,
+      layout: {
+        'icon-image': ['get', 'icon'], 'icon-rotate': ['get', 'rot'], 'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map',
+        'icon-allow-overlap': true, 'icon-ignore-placement': true,
+        // 40 px wide image → 90 % of the lane's drawn width (twice as long as wide).
+        'icon-size': ['interpolate', ['exponential', 2], ['zoom'], 16.6, ['*', ['get', 'w'], (0.9 * 2 ** 16.6) / 116860 / 40], 20, ['*', ['get', 'w'], (0.9 * 2 ** 20) / 116860 / 40]],
+      },
+      paint: { 'icon-opacity': ['interpolate', ['linear'], ['zoom'], 16.6, 0, 17.1, 0.92] },
+    }, map.getLayer('tp-buildings') ? 'tp-buildings' : undefined); // over the route line, like painted arrows seen through it
+    const sig = signalImage();
+    if (sig && !map.hasImage('tp-signal')) map.addImage('tp-signal', sig, { pixelRatio: 2 });
+    map.addLayer({
+      id: 'tp-signals', type: 'symbol', source: 'tp-signals', minzoom: 15.5,
+      layout: {
+        'icon-image': 'tp-signal', 'icon-anchor': 'bottom', 'icon-allow-overlap': true, 'icon-ignore-placement': true,
+        'icon-pitch-alignment': 'viewport', 'icon-rotation-alignment': 'viewport',
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 15.5, 0.45, 17, 0.75, 19, 1.15],
+      },
+      paint: { 'icon-opacity': ['interpolate', ['linear'], ['zoom'], 15.5, 0, 16, 1] },
+    }, map.getLayer('poi-dot') ? 'poi-dot' : undefined);
+    this.applyRoadDetails();
+  }
+
+  /** Lane lines, painted arrows and traffic lights from OpenStreetMap (see map/lanes.ts). */
+  setRoadDetails(d: { lines: any; arrows: any; signals: any }) {
+    this.details = d;
+    this.applyRoadDetails();
+  }
+
+  private applyRoadDetails() {
+    const map = this.map;
+    if (!map || !this.details) return;
+    const set = (id: string, data: any) => { const s = map.getSource(id); if (s) s.setData(data); };
+    set('tp-lanes', this.details.lines);
+    set('tp-lane-arrows', this.details.arrows);
+    set('tp-signals', this.details.signals);
   }
 
   /** Mapbox Traffic v1: congestion lines on each side of the road, beneath the route and buildings. */

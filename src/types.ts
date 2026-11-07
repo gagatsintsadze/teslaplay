@@ -55,6 +55,8 @@ export interface Maneuver {
   label?: string;
   /** Router-written instruction (Mapbox), e.g. "Take the 2nd exit onto …". */
   instruction?: string;
+  /** Lanes approaching this maneuver, left to right: arrows painted on each, and whether it leads the right way. */
+  lanes?: { dirs: string[]; valid: boolean }[];
 }
 
 /** A stretch of the route with moderate (2), heavy (3) or severe (4) congestion, by distance along it. */
@@ -79,6 +81,10 @@ export interface RouteResult {
   trafficAware?: boolean;
   /** Slow stretches along the route (live traffic). */
   traffic?: TrafficSpan[];
+  /** Posted speed limit per geometry segment, km/h (null = unknown). */
+  maxspeed?: (number | null)[];
+  /** Traffic lights the route passes. */
+  signals?: LngLat[];
 }
 
 export interface ElevationProfile {

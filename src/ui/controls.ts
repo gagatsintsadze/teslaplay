@@ -22,6 +22,9 @@ export function mountControls(app: App, hud: HTMLElement) {
   const speedV = h('div.speed-v.num', null, '0');
   const speedU = h('div.speed-u', null, 'km/h');
   const speed = h('div.speed.glass', { 'aria-label': 'Speed' }, speedV, speedU);
+  // Posted speed limit (round European sign) above the speedometer while driving.
+  const limitV = h('span.num');
+  const limit = h('div.limit.hidden', { role: 'img', 'aria-label': 'Speed limit' }, limitV);
 
   const zoom = h('div.ctl-group.glass.lg-flex.zoom-group', null,
     h('button.ctl', { 'aria-label': 'Zoom in', onclick: () => app.zoomBy(1) }, icon('plus', 22)),
@@ -29,7 +32,7 @@ export function mountControls(app: App, hud: HTMLElement) {
   );
   const locate = h('button.ctl-single.glass.lg-flex.locate', { 'aria-label': 'My location', onclick: () => app.cycleLocate() });
 
-  const col = h('div.controls', null, status, settings, layers, compass, h('div.spacer'), speed, zoom, locate);
+  const col = h('div.controls', null, status, settings, layers, compass, h('div.spacer'), limit, speed, zoom, locate);
   const recenter = h('button.recenter.glass.lg-flex.hidden', { onclick: () => app.recenter() }, icon('locate', 20), 'Recenter');
   const toasts = h('div.toasts', { 'aria-live': 'polite' });
   hud.append(col, recenter, toasts);
@@ -72,6 +75,21 @@ export function mountControls(app: App, hud: HTMLElement) {
     setText(speedV, val === '—' ? '0' : val);
     setText(speedU, unit);
   });
+
+  store.select((s) => [s.navigating, s.nav ? s.nav.speedLimit : null, s.fix && s.fix.speed ? Math.round(s.fix.speed * 3.6) : 0, s.settings.units], () => {
+    const s = store.get();
+    const lim = s.navigating && s.nav ? s.nav.speedLimit : null;
+    toggleClass(limit, 'hidden', lim === null);
+    const kmh = s.fix && s.fix.speed ? s.fix.speed * 3.6 : 0;
+    const over = lim !== null && kmh > lim + 4;
+    if (lim !== null) {
+      const shown = s.settings.units === 'imperial' ? Math.round(lim / 1.609 / 5) * 5 : lim;
+      setText(limitV, String(shown));
+      limit.setAttribute('aria-label', `Speed limit ${shown}`);
+    }
+    toggleClass(limit, 'over', over);
+    toggleClass(speed, 'over', over);
+  }, { equals: eq });
 
   // While driving, map chrome recedes after a few idle seconds; any touch brings it back.
   let idleTimer = 0;
