@@ -20,6 +20,8 @@ export class FollowController {
   private from: LngLat | null = null;
   private to: LngLat | null = null;
   private route: RouteResult | null = null;
+  /** Route geometry as drawn (shifted into the lanes of travel); same vertex count as route.coords. */
+  private shown: LngLat[] | null = null;
   private alongFrom = 0;
   private alongTo = 0;
   private start = 0;
@@ -54,8 +56,11 @@ export class FollowController {
     this.kick();
   }
 
+  setDisplayCoords(coords: LngLat[] | null) { this.shown = coords && this.route && coords.length === this.route.coords.length ? coords : null; }
+
   setNavigation(route: RouteResult | null) {
     this.route = route;
+    this.shown = null;
     this.navigating = !!route;
     if (route) { this.alongFrom = this.alongTo = 0; }
     this.kick();
@@ -122,8 +127,9 @@ export class FollowController {
     let target = this.heading;
     if (this.route && this.alongTo >= 0 && this.from === null) {
       const d = this.alongFrom + (this.alongTo - this.alongFrom) * t;
-      const here = pointAt(this.route.coords, this.route.cum, d);
-      const ahead = pointAt(this.route.coords, this.route.cum, d + 12);
+      const line = this.shown || this.route.coords;
+      const here = pointAt(line, this.route.cum, d);
+      const ahead = pointAt(line, this.route.cum, d + 12);
       this.disp = here.coord;
       target = bearing(here.coord, ahead.coord);
     } else if (this.from && this.to) {

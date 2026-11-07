@@ -13,7 +13,11 @@ export interface Padding { top: number; right: number; bottom: number; left: num
 
 export type RouteRole = 'primary' | 'alternative' | 'traveled';
 /** `traffic`: slow stretches of this line (live traffic), drawn over it in orange/red. */
-export interface RouteLine { id: string; coords: LngLat[]; role: RouteRole; traffic?: { coords: LngLat[]; level: number }[] }
+/**
+ * `w`: width in metres of the lanes the car drives in along this piece (0/absent = default width).
+ * A line may be split into `parts` with different widths; `coords` is always the whole line.
+ */
+export interface RouteLine { id: string; coords: LngLat[]; role: RouteRole; parts?: { coords: LngLat[]; w: number }[]; traffic?: { coords: LngLat[]; level: number; w?: number }[] }
 
 export interface MarkerSpec {
   id: string;
@@ -55,7 +59,7 @@ export interface MapEngine {
   onClick(cb: (e: MapClick) => void): void;
   onLongPress(cb: (e: MapClick) => void): void;
   /** Optional: lane-level detail (FeatureCollections from map/lanes.ts). */
-  setRoadDetails?(d: { lines: any; arrows: any; signals: any }): void;
+  setRoadDetails?(d: { lines: any; arrows: any; signals: any; solids?: any }): void;
   /**
    * Driving overlays (optional): `ahead` is the next stretch of route — buildings standing on it
    * are flattened and ghosted so they never hide the line; `maneuver` is a short path through

@@ -22,7 +22,7 @@ const KEEP = ['highway', 'lanes', 'lanes:forward', 'lanes:backward', 'oneway', '
   'turn:lanes:backward', 'maxspeed', 'maxspeed:forward', 'maxspeed:backward', 'divider', 'bridge', 'tunnel', 'layer'];
 
 export interface RoadWay { id: number; g: LngLat[]; t: Record<string, string> }
-export interface RoadTile { key: string; ways: RoadWay[]; signals: LngLat[]; time: number; /** Build stamp of the pre-built dataset it came from. */ built?: string }
+export interface RoadTile { key: string; ways: RoadWay[]; signals: LngLat[]; crossings?: LngLat[]; time: number; /** Build stamp of the pre-built dataset it came from. */ built?: string }
 
 export const tileKey = (x: number, y: number) => `${DETAIL_Z}/${x}/${y}`;
 
@@ -165,6 +165,7 @@ export class RoadDetails {
           key, built, time: Date.now(),
           ways: (j.w || []).map((w: any[]) => ({ id: w[0], t: w[1], g: w[2] })),
           signals: j.s || [],
+          crossings: j.x || [],
         };
         idbPut(tile);
         return tile;
@@ -176,7 +177,7 @@ export class RoadDetails {
     if (cached && Date.now() - cached.time < TTL) return cached;
     const [s, w, n, e] = tileBbox(x, y);
     const q = `[out:json][timeout:60][bbox:${s.toFixed(5)},${w.toFixed(5)},${n.toFixed(5)},${e.toFixed(5)}];`
-      + `(way[highway~"${HIGHWAYS}"];node[highway=traffic_signals];);out geom qt;`;
+      + `(way[highway~"${HIGHWAYS}"];node[highway=traffic_signals];node[highway=crossing][crossing!=unmarked];);out geom qt;`;
     let lastErr: unknown = null;
     for (let attempt = 0; attempt < ENDPOINTS.length; attempt++) {
       const ep = ENDPOINTS[(this.endpoint + attempt) % ENDPOINTS.length];
@@ -204,8 +205,11 @@ export class RoadDetails {
    * on the road's centre line: half the forward carriageway on two-way roads, 0 on one-way roads and
    * where the road is unknown. `heading` per vertex comes from the route itself.
    */
-  driveSideOffsets(coords: LngLat[]): number[] {
-    const out = new Array(coords.length).fill(0);
+  driveSideOffsets(coords: LngLat[]): number[] { return this.driveBands(coords).map((b) => b.off); }
+
+  /** Per vertex: metres to shift right, and width (m) of the carriageway the car drives in (0 = unknown). */
+  driveBands(coords: LngLat[]): { off: number; w: number }[] {
+    const out: { off: number; w: number }[] = coords.map(() => ({ off: 0, w: 0 }));
     let tile: RoadTile | undefined;
     let key = '';
     for (let i = 0; i < coords.length; i++) {
@@ -215,22 +219,26 @@ export class RoadDetails {
       if (!tile) continue;
       const nxt = coords[Math.min(i + 1, coords.length - 1)], prv = coords[Math.max(i - 1, 0)];
       const h = bearing(prv, nxt);
-      let best: { d: number; off: number } | null = null;
+      let best: { d: number; off: number; w: number } | null = null;
       for (const w of tile.ways) {
-        if (isOneway(w.t) !== 0) { // one-way: route already runs down its centre
+        if (w.t.tunnel && w.t.tunnel !== 'no') continue;
+        const lw = laneWidthM(w.t);
+        if (isOneway(w.t) !== 0) { // one-way: the route already runs down the carriageway's centre
           const d = nearestOnWay(p, w.g, h, 10, false);
-          if (d !== null && (!best || d < best.d)) best = { d, off: 0 };
+          if (d !== null && (!best || d < best.d)) best = { d, off: 0, w: totalLanes(w.t) * lw };
           continue;
         }
         const d = nearestOnWay(p, w.g, h, 10, true);
         if (d === null || (best && d >= best.d)) continue;
         const f = forwardLanes(w.t);
-        best = { d, off: f * laneWidthM(w.t) * 0.5 };
+        best = { d, off: f * lw * 0.5, w: f * lw };
       }
-      if (best) out[i] = best.off;
+      if (best) out[i] = { off: best.off, w: best.w };
     }
-    // Smooth single-vertex glitches so the line doesn't zig-zag between matched and unmatched ways.
-    for (let i = 1; i < out.length - 1; i++) if (out[i] === 0 && out[i - 1] > 0 && out[i + 1] > 0) out[i] = (out[i - 1] + out[i + 1]) / 2;
+    // Smooth single-vertex gaps so the band doesn't zig-zag between matched and unmatched ways.
+    for (let i = 1; i < out.length - 1; i++) {
+      if (!out[i].w && out[i - 1].w && out[i + 1].w) out[i] = { off: (out[i - 1].off + out[i + 1].off) / 2, w: (out[i - 1].w + out[i + 1].w) / 2 };
+    }
     return out;
   }
 
@@ -268,15 +276,16 @@ export class RoadDetails {
 function compact(key: string, elements: any[]): RoadTile {
   const ways: RoadWay[] = [];
   const signals: LngLat[] = [];
+  const crossings: LngLat[] = [];
   for (const el of elements) {
-    if (el.type === 'node' && typeof el.lon === 'number') signals.push([+el.lon.toFixed(6), +el.lat.toFixed(6)]);
+    if (el.type === 'node' && typeof el.lon === 'number') (el.tags && el.tags.highway === 'crossing' ? crossings : signals).push([+el.lon.toFixed(6), +el.lat.toFixed(6)]);
     else if (el.type === 'way' && Array.isArray(el.geometry) && el.geometry.length > 1) {
       const t: Record<string, string> = {};
       for (const k of KEEP) if (el.tags && el.tags[k] !== undefined) t[k] = String(el.tags[k]);
       ways.push({ id: el.id, g: el.geometry.map((p: any) => [+p.lon.toFixed(6), +p.lat.toFixed(6)] as LngLat), t });
     }
   }
-  return { key, ways, signals, time: Date.now() };
+  return { key, ways, signals, crossings, time: Date.now() };
 }
 
 /** 1 = one-way along the geometry, -1 = against it, 0 = two-way. */
@@ -322,12 +331,20 @@ export function forwardLanes(t: Record<string, string>): number {
   const base = BASE_LANES[(t.highway || '').replace(/_link$/, '')];
   return base ? base[0] : 1;
 }
-/** Drawn lane width in metres (mirrors map/lanes.ts: 2.6–3.5 m). */
+/** All lanes of a one-way carriageway (tags, else class default). */
+export function totalLanes(t: Record<string, string>): number {
+  const n = parseInt(t.lanes || '', 10);
+  if (n >= 1) return n;
+  const cls = (t.highway || '').replace(/_link$/, '');
+  const link = /_link$/.test(t.highway || '');
+  return (cls === 'motorway' || cls === 'trunk') && !link && t.junction !== 'roundabout' ? 2 : 1;
+}
+/** Drawn lane width in metres — must mirror map/lanes.ts (lanes are drawn generously, 5.2–7 m, like nav maps). */
 export function laneWidthM(t: Record<string, string>): number {
   const cls = (t.highway || '').replace(/_link$/, '');
-  const total: Record<string, number> = { motorway: 11, trunk: 10, primary: 8, secondary: 6.5, tertiary: 5.25 };
-  const n = parseInt(t.lanes || '', 10) || (isOneway(t) ? 1 : 2);
-  return Math.max(2.6, Math.min(3.5, (total[cls] || 4) / n));
+  const total: Record<string, number> = { motorway: 22, trunk: 20, primary: 16, secondary: 13, tertiary: 10.5 };
+  const n = parseInt(t.lanes || '', 10) || (isOneway(t) ? totalLanes(t) : 2);
+  return Math.max(5.2, Math.min(7, (total[cls] || 8) / n));
 }
 
 function segDistance(p: LngLat, a: LngLat, b: LngLat): number {

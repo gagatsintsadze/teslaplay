@@ -11,6 +11,7 @@ Writes out/14/<x>/<y>.json for every zoom-14 tile (~1.8 km in Georgia) that has 
 - "w": every drivable road (motorway … living_street, incl. links and roundabouts) with only the tags
        the app draws from: lanes, turn lanes, speed limits, oneway/junction, bridge/tunnel/layer
 - "s": traffic lights (highway=traffic_signals)
+- "x": pedestrian crossings (highway=crossing) — drawn as zebra stripes
 
 plus out/meta.json. The app loads these files instead of asking Overpass, so road details show
 instantly anywhere in the country. Run weekly by .github/workflows/roads.yml.
@@ -48,15 +49,19 @@ def metres(a, b):
 class Collect(osmium.SimpleHandler):
     def __init__(self):
         super().__init__()
-        self.tiles = defaultdict(lambda: {'w': [], 's': []})
+        self.tiles = defaultdict(lambda: {'w': [], 's': [], 'x': []})
         self.ways = 0
         self.signals = 0
 
     def node(self, n):
-        if n.tags.get('highway') == 'traffic_signals' and n.location.valid():
+        hw = n.tags.get('highway')
+        if hw == 'traffic_signals' and n.location.valid():
             lon, lat = n.location.lon, n.location.lat
             self.tiles[tile(lon, lat)]['s'].append([round(lon, 6), round(lat, 6)])
             self.signals += 1
+        elif hw == 'crossing' and n.location.valid() and n.tags.get('crossing') not in ('unmarked', 'no', 'informal'):
+            lon, lat = n.location.lon, n.location.lat
+            self.tiles[tile(lon, lat)]['x'].append([round(lon, 6), round(lat, 6)])
 
     def way(self, w):
         if w.tags.get('highway') not in HIGHWAYS:
@@ -95,7 +100,7 @@ def main():
         d = os.path.join(out, str(Z), str(x))
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, f'{y}.json'), 'w', encoding='utf-8') as f:
-            json.dump({'v': 1, 'built': built, 'w': data['w'], 's': data['s']}, f, ensure_ascii=False, separators=(',', ':'))
+            json.dump({'v': 2, 'built': built, 'w': data['w'], 's': data['s'], 'x': data['x']}, f, ensure_ascii=False, separators=(',', ':'))
         total += 1
     meta = {'v': 1, 'z': Z, 'built': built, 'tiles': total, 'ways': h.ways, 'signals': h.signals,
             'sources': [os.path.basename(s) for s in sources],

@@ -126,6 +126,8 @@ export class App {
     if (this.roads && this.engine.setRoadDetails) {
       this.roads.onTile(() => { this.renderRoads(true); this.store.set({ roadsVersion: this.state.roadsVersion + 1 }); });
       this.store.select((s) => [s.navRoute, s.routes, s.routeIndex], () => this.renderRoads(true), { equals: shallowEqualArray });
+      // The puck glides along the drawn (lane-aligned) line, not the road's centre line.
+      this.store.select((s) => [s.navRoute, s.roadsVersion], () => { if (this.state.navRoute) this.follow.setDisplayCoords(this.drawCoords(this.state.navRoute)); }, { equals: shallowEqualArray });
     }
     this.engine.onClick((e) => this.onMapTap(e));
     this.engine.onLongPress((e) => this.dropPin(e.coord));
@@ -225,21 +227,23 @@ export class App {
     const tiles = keys.map((k) => roads.tiles.get(k)!);
     const ways = tiles.flatMap((t) => t.ways);
     const signals = tiles.flatMap((t) => t.signals).concat(route && route.signals ? route.signals : []);
-    this.engine.setRoadDetails(buildLanes(ways, signals));
+    this.engine.setRoadDetails(buildLanes(ways, signals, tiles.flatMap((t) => t.crossings || [])));
   }
 
-  private drawCache = new Map<string, { v: number; coords: LngLat[] }>();
-  /** Route geometry moved into the lanes of travel (right of the centre line on two-way roads). */
-  drawCoords(r: RouteResult): LngLat[] {
-    if (!this.roads) return r.coords;
+  private drawCache = new Map<string, { v: number; coords: LngLat[]; widths: number[] }>();
+  /** Route geometry moved into the lanes of travel (right of the centre line on two-way roads), plus the lane-band width per vertex. */
+  drawGeometry(r: RouteResult): { coords: LngLat[]; widths: number[] } {
+    if (!this.roads) return { coords: r.coords, widths: [] };
     const v = this.state.roadsVersion;
     const hit = this.drawCache.get(r.id);
-    if (hit && hit.v === v) return hit.coords;
-    const coords = offsetLine(r.coords, this.roads.driveSideOffsets(r.coords));
+    if (hit && hit.v === v) return hit;
+    const bands = this.roads.driveBands(r.coords);
+    const entry = { v, coords: offsetLine(r.coords, bands.map((b) => b.off)), widths: bands.map((b) => b.w) };
     if (this.drawCache.size > 12) this.drawCache.clear();
-    this.drawCache.set(r.id, { v, coords });
-    return coords;
+    this.drawCache.set(r.id, entry);
+    return entry;
   }
+  drawCoords(r: RouteResult): LngLat[] { return this.drawGeometry(r).coords; }
 
   /** Best current position: GPS fix, else the map centre, else the boot centre. */
   here(): LngLat {
