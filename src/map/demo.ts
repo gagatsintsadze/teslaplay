@@ -5,7 +5,7 @@ import type { MapClick, MapEngine, MarkerSpec, Padding, RouteLine, ViewRequest, 
 /**
  * Offline map used by demo mode (no API key, no network): a Web-Mercator canvas that
  * renders a static map backdrop, route lines and DOM markers. It lets the whole app —
- * search, routing, EV planning, turn-by-turn — be developed and tested without Yandex.
+ * search, routing, EV planning, turn-by-turn — be developed and tested offline.
  */
 
 const TILE = 256;

@@ -1,4 +1,4 @@
-/** [longitude, latitude] — the coordinate order used by Yandex Maps JS API v3. */
+/** [longitude, latitude] — the GeoJSON / MapLibre / Mapbox coordinate order. */
 export type LngLat = [number, number];
 /** [[west, north], [east, south]] — top-left and bottom-right corners. */
 export type LngLatBounds = [LngLat, LngLat];
@@ -12,7 +12,7 @@ export interface ChargerInfo {
   operational?: boolean;
   cost?: string;
   operator?: string;
-  source: 'ocm' | 'osm' | 'yandex' | 'demo';
+  source: 'ocm' | 'osm' | 'demo';
 }
 
 export interface Place {
@@ -20,7 +20,7 @@ export interface Place {
   name: string;
   subtitle?: string;
   coord?: LngLat;
-  /** Yandex object URI (from suggest) used to resolve coordinates lazily. */
+  /** Provider object id, when coordinates are resolved lazily. */
   uri?: string;
   kind?: PlaceKind;
   category?: string;
@@ -53,7 +53,12 @@ export interface Maneuver {
   street?: string;
   /** For waypoint maneuvers: the stop's name. */
   label?: string;
+  /** Router-written instruction (Mapbox), e.g. "Take the 2nd exit onto …". */
+  instruction?: string;
 }
+
+/** A stretch of the route with moderate (2), heavy (3) or severe (4) congestion, by distance along it. */
+export interface TrafficSpan { from: number; to: number; level: 2 | 3 | 4 }
 
 export interface RouteResult {
   id: string;
@@ -68,6 +73,12 @@ export interface RouteResult {
   /** Distances along the route where each intermediate waypoint is reached. */
   waypointDists: number[];
   via?: string;
+  /** Live-traffic routers: the ETA without today's traffic, seconds. */
+  durationTypical?: number;
+  /** True when the router returned congestion for every segment. */
+  trafficAware?: boolean;
+  /** Slow stretches along the route (live traffic). */
+  traffic?: TrafficSpan[];
 }
 
 export interface ElevationProfile {
@@ -140,7 +151,5 @@ export interface Settings {
   textSize: 'standard' | 'large' | 'larger';
   traffic: boolean;
   view3D: boolean;
-  /** Drive: high-contrast asphalt roads and lane markings on the Yandex map. Classic: Yandex's stock scheme. */
-  roadStyle: 'drive' | 'classic';
   devTools: boolean;
 }

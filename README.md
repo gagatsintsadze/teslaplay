@@ -1,12 +1,13 @@
 # Teslaplay — navigation for Tesla's in-car browser
 
 A web navigation app built to run in Tesla's built-in browser in places where the car's own
-navigation falls short (Georgia, much of Central Asia). It uses Yandex Maps JS API v3 for the map,
-search, traffic and routing, and adds EV trip planning, turn-by-turn guidance and an interface in Apple's Liquid Glass design language,
-sized for a car screen.
+navigation falls short (Georgia, much of Central Asia). The map is OpenStreetMap data in its own "Drive"
+style (MapLibre GL + OpenFreeMap tiles, 3D buildings), live traffic comes from Mapbox, and it adds EV trip
+planning, turn-by-turn guidance and an interface in Apple's Liquid Glass design language, sized for a car screen.
 
 - **Zero runtime dependencies.** TypeScript compiled to one ~179 KB script (≈60 KB gzipped) plus ~42 KB of CSS. It stays light on older Tesla hardware (MCU2).
-- **Demo mode** runs without any API key or network access, so you can work on the UI without spending Yandex quota.
+- **Runs without any key.** Map, search, places, chargers and routing are free OpenStreetMap services; a Mapbox token adds live traffic.
+- **Demo mode** runs without network access, so you can work on the UI offline.
 
 ---
 
@@ -20,7 +21,7 @@ npm run build        # → dist/  static files, deploy anywhere
 npm run build:demo   # → dist-demo/teslaplay-demo.html  one self-contained offline demo
 ```
 
-URL switches: `?demo=1` (offline demo) · `?sim=1` (always simulate the drive) · `?key=…` (try a key without saving it) · `?lang=ru_RU` · `?tesla=1` (force Tesla tuning on a desktop browser).
+URL switches: `?demo=1` (offline demo) · `?sim=1` (always simulate the drive) · `?mapbox=pk.…` (try a Mapbox token without saving it) · `?lang=ka_GE` · `?tesla=1` (force Tesla tuning on a desktop browser).
 
 ## Keys and configuration
 
@@ -28,39 +29,19 @@ Edit **`public/config.js`** (copied to `dist/config.js`; you can change it on th
 
 | Key | Where | Used for | If it's missing |
 |---|---|---|---|
-| `yandexApiKey` | Yandex Developer Dashboard → *JavaScript API* | the Yandex map | the OpenStreetMap map (MapLibre + CARTO tiles), also used whenever Yandex refuses to load. The app never asks the driver for keys. |
-| `yandexSuggestKey` | *Geosuggest API* (free tier) | search-as-you-type | falls back to Places search, then to the Yandex Geocoder merged with OpenStreetMap (Photon) |
-| `yandexSearchKey` | *Places API* (free tier, 500 requests/day) | businesses, categories (cafés, parking…) | OpenStreetMap: Photon for search, Overpass for nearby categories |
-| `yandexRouterKey` | *Router API* | driving routes with live traffic (`ymaps3.route`) | falls back to OpenStreetMap routing (public OSRM server) |
-| `yandexGeocoderKey` | *Geocoder API* | addresses, reverse geocoding for street names (`geocode-maps.yandex.ru/v1`) | the JS API key on the legacy `1.x` endpoint |
-| `yandexMatrixKey` | *Distance Matrix API* | real drive times on nearby results, ranked by time | results ranked by straight-line distance |
-| `openChargeMapKey` | openchargemap.org → My profile → API keys (free) | charger power and connector data | chargers come from OpenStreetMap (Overpass, incl. GB/T and power where mapped), then Yandex Places |
+| `mapboxToken` | account.mapbox.com → *Tokens* (public `pk.` token) | live traffic: traffic-aware routes and ETAs (Directions `driving-traffic`), traffic colours on the map (Traffic v1 tiles) and on the route, drive times on nearby results (Matrix), ETA re-checked every 4 minutes while driving with "faster route" switching | routes from OpenStreetMap (public OSRM server) without traffic |
+| `openChargeMapKey` | openchargemap.org → My profile → API keys (free) | charger power and connector data | chargers come from OpenStreetMap (Overpass, incl. GB/T and power where mapped) |
+| `mapLang` | — | label and search language: `en_US`, `ka_GE`, `ru_RU`, `uk_UA`, `tr_TR` | English |
 
-On the Yandex map, **Settings → Appearance → Road style** switches between *Drive* (dark asphalt roads with white lane markings at street zoom, wider roads, muted land) and Yandex's stock scheme.
+Always free, no key: map tiles (OpenFreeMap), search (Photon), nearby places and chargers (Overpass), weather and elevation (Open-Meteo).
 
-**`yandex-test.html`** (Settings → Map services → *Yandex key test*) loads the JS API v3 and the older 2.1 map side by side with the deployed keys, plus the Router and Geocoder, and says in one line why the Yandex map isn't loading (key refused on this domain, or a stale key saved in the browser). Teslaplay itself retries with the deployed key when a key saved in the browser is refused.
+**Mapbox free tier** (enough for one car): 100,000 directions requests, 100,000 matrix elements and 200,000 vector tile requests a month. Restrict the token to your site under *URL restrictions* (e.g. `https://gagatsintsadze.github.io/teslaplay/`); the page sends its full URL as referrer so a path restriction matches. Live traffic in Georgia is covered by Mapbox's real-time + typical traffic.
 
-**Settings → Map services → Check services** tests every service with the keys in that browser (Yandex map, Geosuggest, Places, routing, Geocoder, traffic; OSRM, Photon, Overpass, Open Charge Map, weather, GPS). It shows what the app is using for search, places, directions and chargers, and *Copy report* puts the results on the clipboard.
-
-### ⚠️ JS API v3 keys need an HTTP Referer restriction
-Yandex checks v3 keys against the key's **HTTP Referer** list. In the Developer Dashboard, open the key's settings and add every host you'll use: bare domains, one per line, with no `https://`, port or path (subdomains are included automatically), for example:
-
-```
-gagatsintsadze.github.io
-localhost
-```
-
-Do the same for the Router, Geocoder and Distance Matrix keys: they sit in the public `config.js`, so the referer list is what keeps others from spending their quota. Save it and wait for the key status to say **Active**; that can take up to 15 minutes. If the map still won't load, the app's error screen says whether Yandex rejected the key or the domain. Browser keys are always visible in page source; the referer list is what protects them.
-
-### Yandex plan notes (worth reading before launch)
-- **Live traffic** (`YMapTrafficLayer`) only works on **paid** Yandex tariffs. The app tries to load it, and if your key doesn't allow it, hides the toggle.
-- Routing and geocoding/search requests count against your daily limits. The app prefetches a route once per place card and reuses it when you tap Directions, and street-name lookups are limited to the next two maneuvers.
-- The free tier's terms exclude transport monitoring and limited-access commercial products. A public or paid Teslaplay will very likely need a **commercial license** (paid-api-maps@yandex-team.ru).
-- Don't hide the Yandex logo or copyright. The UI keeps the bottom-right corner clear for them.
+**Settings → Map services → Check services** tests every service from that browser (map tiles, Mapbox routes, traffic tiles and drive times, OSRM, Photon, Overpass, Open Charge Map, weather, GPS) and shows what the app is using for each job; *Copy report* puts the results on the clipboard.
 
 ## Deploying
 
-**Quickest:** build (or use the pre-built `dist/` folder in the zip), then drag the `dist` folder into *Cloudflare Pages → Create → Upload assets* or *Netlify → Add new site → Deploy manually*. Add the resulting domain (e.g. `teslaplay.pages.dev`) to the key's HTTP Referer list.
+**Quickest:** build (or use the pre-built `dist/` folder in the zip), then drag the `dist` folder into *Cloudflare Pages → Create → Upload assets* or *Netlify → Add new site → Deploy manually*. Add the resulting URL to the Mapbox token's URL restrictions.
 
 Any static host with **HTTPS** works; geolocation requires it (Cloudflare Pages, Netlify, Vercel, GitHub Pages, nginx). Asset paths are relative, so it also works from a sub-path. In the car, open the URL, allow location when asked, and bookmark it.
 
@@ -94,9 +75,7 @@ src/
   mapsync.ts         keeps routes / pins / insets on the map in sync with state
   map/
     engine.ts        MapEngine interface (the only thing the app knows about maps)
-    yandex.ts        Yandex JS API v3 implementation (YMap, markers, features, traffic, listener, turn arrows, zoom-scaled route line)
-    yandex-style.ts  "Drive" customization of the Yandex vector scheme: asphalt roads, lane markings, wider streets
-    osm.ts           OpenStreetMap map (self-hosted MapLibre GL): routes, ghosted buildings on the route, turn arrows
+    osm.ts           the map (self-hosted MapLibre GL): routes with traffic colours, Mapbox traffic layer, ghosted buildings on the route, turn arrows
     style.ts         "Drive" map style on OpenFreeMap tiles: real-width asphalt roads with markings, 3D buildings, labels
     demo.ts          offline Web-Mercator engine used by demo mode
     markers.ts       pins, charger badges, the user puck
@@ -105,13 +84,14 @@ src/
     session.ts       turn-by-turn: map-matching, progress, ETA, off-route → reroute, voice prompts
     follow.ts        60 fps puck interpolation between 1 Hz GPS fixes + follow / heading-up camera
   services/
-    search.ts        ymaps3.suggest / ymaps3.search (+ reverse geocoding for street names)
-    routing.ts       ymaps3.route / Router API over HTTP → RouteResult; router chain with OSRM last
-    maneuvers.ts     builds turn instructions from route geometry (see below)
+    search.ts        search on OpenStreetMap (Photon search-as-you-type, Overpass categories, reverse geocoding)
+    routing.ts       RouteResult builder + router chain (Mapbox live traffic, then OSRM)
+    mapbox.ts        Mapbox: driving-traffic routes with real maneuvers and congestion, Matrix drive times, traffic tiles
+    osrm.ts          OpenStreetMap routing (public OSRM server), no traffic
+    maneuvers.ts     builds turn instructions from route geometry for routers without them
     ev.ts            vehicle presets, energy model, charging-stop planner
-    chargers.ts      Open Charge Map along-route search, Yandex fallback
-    matrix.ts        Yandex Distance Matrix: drive times for nearby results
-    osm.ts           OpenStreetMap fallbacks: Photon search, Overpass categories and chargers
+    chargers.ts      Open Charge Map along-route search, OpenStreetMap fallback
+    osm.ts           OpenStreetMap services: Photon search, Overpass categories and chargers
     diagnostics.ts   Settings → Map services: live check of every service + copyable report
     weather.ts       Open-Meteo weather at origin/destination + elevation profile
     location.ts      GPS with Tesla workarounds + route simulator
@@ -123,22 +103,14 @@ src/
 styles/              design tokens + Liquid Glass material + component styles (light/dark)
 ```
 
-### How turn-by-turn works with Yandex
-`ymaps3.route` returns geometry, distance, duration and **steps, but no maneuver instructions**. `services/maneuvers.ts` reconstructs them: every step boundary is a candidate, and its turn angle (road bearing 30 m before vs 30 m after) is classified as slight, turn, sharp or U-turn. Without steps, it falls back to detecting sharp, concentrated bends in the geometry, which separates junctions from sweeping mountain curves. Street names come from reverse geocoding 40 m past each upcoming turn.
+### Turn-by-turn and live traffic
+With a Mapbox token, routes come from Mapbox Directions (`driving-traffic`): real maneuvers (turns, forks, roundabouts) with street names, ETAs from real-time + typical traffic, and congestion for every segment. Slow stretches are drawn over the blue route in orange/red, the route card shows the delay against a normal day, and while driving the route is re-checked every 4 minutes from the car's position: same roads → fresher ETA and colours; a different route that saves 3+ minutes → switch, with a spoken notice. Without a token, OSRM supplies routes and street names, and `services/maneuvers.ts` rebuilds the turns from the geometry.
 
 ### EV model
 For each section of the route: base Wh/km (vehicle preset or your override) × a speed factor (taken from that step's average speed) × a temperature factor (heating/AC), plus climbs and descents from the elevation profile (climbs cost ÷0.9, descents recover ×0.65). The planner drives as far as your arrival reserve allows, picks the most powerful charger within the last 40 km of range, charges just enough to finish (capped at your charge limit), and repeats. It then re-routes through the chosen chargers and re-checks the plan on that exact route. The vehicle figures are estimates: set your real usable kWh and consumption in Settings.
 
-## Check these on a live key
-I built and tested the Yandex adapter against a stand-in API that has the same surface, but not against Yandex's servers. Check these first:
-1. **Compass direction:** rotate the map by hand. If the compass needle turns the wrong way, flip `AZIMUTH_SIGN` in `src/map/yandex.ts`.
-2. **Tapping map POIs** should open a place card. The hotspot property names are read defensively in `YandexEngine.handleClick`.
-3. **Street names in the maneuver banner.** These come from reverse geocoding (`YandexSearch.reverse`), which passes `"lng,lat"` as the query text.
-4. **Turn quality:** whether `toSteps()` boundaries line up with junctions. If they don't, maneuvers fall back to geometry detection.
-5. **Alternatives:** how many routes `ymaps3.route` returns on your plan.
-
 ## Ideas for next steps
 - **Tesla Fleet API** (needs a small backend and OAuth): real battery %, sending the destination to the car, preconditioning before Superchargers.
 - Georgian and Russian UI strings (the UI text is centralized enough to extract).
-- Speed limits from OpenStreetMap `maxspeed`; Yandex doesn't expose them.
-- An offline app shell (service worker) for patchy LTE. Map tiles can't be cached under Yandex terms.
+- Speed limits from OpenStreetMap `maxspeed` (or Mapbox's `maxspeed` annotation).
+- An offline app shell (service worker) for patchy LTE, with recently used map tiles cached.

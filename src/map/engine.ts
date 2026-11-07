@@ -12,7 +12,8 @@ export interface ViewState {
 export interface Padding { top: number; right: number; bottom: number; left: number }
 
 export type RouteRole = 'primary' | 'alternative' | 'traveled';
-export interface RouteLine { id: string; coords: LngLat[]; role: RouteRole }
+/** `traffic`: slow stretches of this line (live traffic), drawn over it in orange/red. */
+export interface RouteLine { id: string; coords: LngLat[]; role: RouteRole; traffic?: { coords: LngLat[]; level: number }[] }
 
 export interface MarkerSpec {
   id: string;
@@ -24,22 +25,20 @@ export interface MarkerSpec {
 
 export interface MapClick {
   coord: LngLat;
-  /** Set when a map POI (Yandex hotspot) was tapped. */
+  /** Set when a map POI was tapped. */
   poi?: { name: string; subtitle?: string; coord: LngLat };
 }
 
 export interface ViewRequest extends Partial<ViewState> { duration?: number }
 
-/** Everything the app needs from a map. Implemented by YandexEngine, OsmEngine (MapLibre fallback) and the offline DemoEngine. */
+/** Everything the app needs from a map. Implemented by OsmEngine (MapLibre) and the offline DemoEngine. */
 export interface MapEngine {
-  readonly kind: 'yandex' | 'osm' | 'demo';
+  readonly kind: 'osm' | 'demo';
   readonly supportsTraffic: boolean;
   /** Steepest camera pitch the engine renders well, degrees (the driving view uses it). */
   readonly maxTilt: number;
-  init(container: HTMLElement, opts: { center: LngLat; zoom: number; theme: 'light' | 'dark'; roadStyle?: 'drive' | 'classic' }): Promise<void>;
+  init(container: HTMLElement, opts: { center: LngLat; zoom: number; theme: 'light' | 'dark' }): Promise<void>;
   setTheme(theme: 'light' | 'dark'): void;
-  /** Yandex only: switch between the Drive road styling and Yandex's stock scheme. */
-  setRoadStyle?(style: 'drive' | 'classic'): void;
   /** Resolves to whether traffic could be shown. */
   setTraffic(visible: boolean): Promise<boolean>;
   setView(req: ViewRequest): void;

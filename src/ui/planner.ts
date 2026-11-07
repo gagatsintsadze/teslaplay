@@ -54,6 +54,16 @@ export function plannerView(app: App): Node[] {
   return nodes;
 }
 
+/** Live traffic (Mapbox): delay against a normal day, or "Light traffic". */
+function trafficBadge(r: RouteResult) {
+  if (!r.trafficAware) return null;
+  const delay = r.durationTypical ? r.duration - r.durationTypical : 0;
+  const slow = (r.traffic || []).reduce((a, t) => a + (t.to - t.from), 0);
+  if (delay >= 120) return badge(`+${Math.round(delay / 60)} min traffic`, delay >= 600 ? 'red' : 'orange');
+  if (slow > 1500) return badge('Some traffic', 'orange');
+  return badge('Light traffic', 'green');
+}
+
 function routeOption(app: App, r: RouteResult, i: number) {
   const s = app.state;
   const sel = i === s.routeIndex;
@@ -70,6 +80,7 @@ function routeOption(app: App, r: RouteResult, i: number) {
       h('span.num', null, formatDistance(r.distance)),
       r.via ? [h('span.dot'), h('span', null, `via ${r.via}`)] : null,
       fastest && s.routes.length > 1 ? badge('Fastest', 'green') : null,
+      trafficBadge(r),
       r.hasTolls ? badge('Tolls', 'orange') : null,
       plan && plan.stops.length ? badge(`${plan.stops.length} charging stop${plan.stops.length > 1 ? 's' : ''}`, 'blue') : null,
     ),

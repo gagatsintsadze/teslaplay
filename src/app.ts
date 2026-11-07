@@ -1,7 +1,7 @@
 import type { AppConfig } from './config';
 import { isTesla, likelyLowEnd, measureSluggish } from './core/env';
 import { setUnits } from './core/format';
-import { boundsOf, distance, padBounds, slice } from './core/geo';
+import { boundsOf, distance, padBounds, pointAt, projectOnRoute, slice } from './core/geo';
 import { storage } from './core/storage';
 import { shallowEqualArray, Store } from './core/store';
 import { isDaylight, sunPosition } from './core/sun';
@@ -9,7 +9,6 @@ import { DemoEngine } from './map/demo';
 import type { MapClick, MapEngine, Padding } from './map/engine';
 import { createPuck } from './map/markers';
 import { OsmEngine } from './map/osm';
-import { YandexEngine } from './map/yandex';
 import { FollowController, type FollowMode } from './nav/follow';
 import { NavigationSession } from './nav/session';
 import { type ChargerService, LiveChargers } from './services/chargers';
@@ -17,20 +16,21 @@ import { DemoChargers, DemoRouting, DemoSearch } from './services/demo';
 import { DEMO_BOUNDS, DEMO_START } from './services/demo-data';
 import { type EnergyModel, energyModel, evaluateStops, midpoint, planTrip, quickArrival, vehicleById } from './services/ev';
 import { LocationService } from './services/location';
-import { FallbackRouting, type RoutingService, YandexRouterHttp, YandexRouting } from './services/routing';
-import { HttpGeocoder } from './services/geocoder';
-import { DriveTimes } from './services/matrix';
+import { FallbackRouting, type NamedRouter, type RoutingService } from './services/routing';
+import { MapboxMatrix, MapboxRouting } from './services/mapbox';
 import { OsmPlaces } from './services/osm';
 import { OsrmRouting } from './services/osrm';
-import { type SearchService, YandexSearch } from './services/search';
+import { OsmSearch, type SearchService } from './services/search';
 import { Voice } from './services/voice';
 import { WeatherService } from './services/weather';
 import { type AppState, initialState } from './state';
-import type { Fix, LngLat, Place, RouteResult, Settings } from './types';
+import type { ChargeStop, Fix, LngLat, Place, RouteResult, Settings } from './types';
 import { FrameGuard, lensSupported, type Material } from './ui/glass';
 import type { Category } from './ui/icons';
 
 const TBILISI: LngLat = [44.7934, 41.7151];
+/** How often a live-traffic route is re-checked while driving. */
+const TRAFFIC_REFRESH = 4 * 60e3;
 
 /** Application controller: owns services + state, exposes intent methods to the UI. */
 export class App {
@@ -41,8 +41,7 @@ export class App {
   chargers: ChargerService;
   weather: WeatherService;
   osm: OsmPlaces | null = null;
-  geocoder: HttpGeocoder | null = null;
-  matrix: DriveTimes | null = null;
+  matrix: MapboxMatrix | null = null;
   location = new LocationService();
   voice = new Voice();
   puck = createPuck();
@@ -65,31 +64,33 @@ export class App {
   private materialStep = 0;
   private frameGuard = new FrameGuard(() => this.stepDownMaterial());
   layoutListeners: (() => void)[] = [];
+  private trafficTimer = 0;
 
   constructor(public cfg: AppConfig) {
     this.store = new Store(initialState(cfg.demo));
     const demo = cfg.demo;
     this.engine = demo
       ? new DemoEngine({ url: cfg.demoBackdropUrl, trafficUrl: cfg.demoBackdropUrl.startsWith('data:') ? undefined : 'demo/backdrop-traffic.jpg', bounds: DEMO_BOUNDS })
-      : new YandexEngine(cfg);
+      : new OsmEngine(cfg.mapLang, cfg.mapboxToken);
     if (demo) {
       this.search = new DemoSearch();
       this.routing = new DemoRouting();
     } else {
       this.osm = new OsmPlaces(cfg.mapLang);
-      this.geocoder = new HttpGeocoder(cfg.yandexGeocoderKey || cfg.yandexApiKey, cfg.mapLang, cfg.yandexApiKey);
-      this.matrix = cfg.yandexMatrixKey ? new DriveTimes(cfg.yandexMatrixKey) : null;
-      const ys = new YandexSearch(this.geocoder, this.osm);
-      this.search = ys;
-      let warned = false;
-      const chain = [{ name: 'Yandex (JS API)', router: new YandexRouting() as RoutingService }];
-      if (cfg.yandexRouterKey) chain.push({ name: 'Yandex Router API', router: new YandexRouterHttp(cfg.yandexRouterKey) });
+      this.search = new OsmSearch(this.osm);
+      // Mapbox (live traffic) when a token is set; OpenStreetMap routing (OSRM) always behind it.
+      const chain: NamedRouter[] = [];
+      if (cfg.mapboxToken) {
+        this.matrix = new MapboxMatrix(cfg.mapboxToken);
+        chain.push({ name: 'Mapbox (live traffic)', router: new MapboxRouting(cfg.mapboxToken, ['ru', 'uk', 'tr'].includes(cfg.mapLang.slice(0, 2)) ? cfg.mapLang.slice(0, 2) : 'en') });
+      }
       chain.push({ name: 'OpenStreetMap (OSRM)', router: new OsrmRouting() });
+      let warned = false;
       this.routing = new FallbackRouting(chain, () => {
-        if (!warned) { warned = true; this.toast('Yandex routing didn’t answer — using OpenStreetMap routes.', 'warn', 6000); }
+        if (!warned) { warned = true; this.toast('Live-traffic routing didn’t answer — using OpenStreetMap routes without traffic.', 'warn', 6000); }
       });
     }
-    this.chargers = demo ? new DemoChargers() : new LiveChargers(cfg.openChargeMapKey, this.search, this.osm!);
+    this.chargers = demo ? new DemoChargers() : new LiveChargers(cfg.openChargeMapKey, this.osm!);
     this.weather = new WeatherService(demo);
   }
 
@@ -102,7 +103,7 @@ export class App {
     const center = this.cfg.demo ? DEMO_START : last || TBILISI;
     this.bootCenter = center;
     this.applyTheme();
-    await this.engine.init(mapEl, { center, zoom: this.cfg.demo ? 17.2 : 15, theme: this.state.theme, roadStyle: this.state.settings.roadStyle });
+    await this.engine.init(mapEl, { center, zoom: this.cfg.demo ? 17.2 : 15, theme: this.state.theme });
     this.mapReady = true;
 
     this.follow = new FollowController(this.engine, this.puck, {
@@ -128,6 +129,14 @@ export class App {
       this.location.start();
     }
 
+    this.store.set({ trafficAvailable: this.engine.supportsTraffic });
+    if (this.engine instanceof OsmEngine) {
+      this.engine.onTrafficError = (msg) => {
+        if (!this.state.trafficAvailable) return;
+        this.store.set({ trafficAvailable: false });
+        this.toast(msg, 'warn', 7000);
+      };
+    }
     if (this.state.settings.traffic) this.setTraffic(true);
     setInterval(() => this.applyTheme(), 5 * 60e3);
     setInterval(() => this.refreshWeather(), 15 * 60e3);
@@ -173,16 +182,6 @@ export class App {
     this.toast(this.state.material === 'frosted' ? 'Glass lensing paused to keep the map smooth' : 'Using solid panels to keep the map smooth', 'info', 4500);
   }
 
-  /** Why the Yandex map isn't in use (shown in Settings → Map services). */
-  mapFallbackReason = '';
-
-  /** Swap to the OpenStreetMap map (before `start`) — used when the Yandex map can't load. */
-  useOsmMap(reason: string) {
-    this.mapFallbackReason = reason;
-    this.engine = new OsmEngine(this.cfg.mapLang);
-    this.store.set({ trafficAvailable: false });
-  }
-
   /** Best current position: GPS fix, else the map centre, else the boot centre. */
   here(): LngLat {
     const f = this.state.fix;
@@ -216,7 +215,6 @@ export class App {
     this.applySettings(settings, false);
     if ('themeMode' in patch) this.applyTheme();
     if ('traffic' in patch) this.setTraffic(!!patch.traffic);
-    if ('roadStyle' in patch) this.engine.setRoadStyle?.(settings.roadStyle);
     if ('view3D' in patch) {
       this.follow.tilt3D = !!patch.view3D;
       if (!this.state.navigating) this.engine.setView({ tilt: this.follow.exploreTilt, duration: 500 });
@@ -259,7 +257,7 @@ export class App {
     const ok = await this.engine.setTraffic(on);
     if (!ok && on) {
       this.store.set({ trafficAvailable: false });
-      this.toast('Live traffic needs a paid Yandex Maps plan on this key.', 'info', 5000);
+      this.toast('Live traffic needs a Mapbox token (Settings → Map data).', 'info', 5000);
     }
   }
 
@@ -303,7 +301,7 @@ export class App {
       if (id !== this.seq.suggest) return;
       console.error(e);
       this.store.set({ searching: false, suggestions: [] });
-      this.toast('Search is unavailable — check the Yandex search key.', 'err');
+      this.toast('Search is unavailable — check your connection.', 'err');
     }
   }
 
@@ -322,24 +320,20 @@ export class App {
     } catch (e) {
       console.error(e);
       if (id === this.seq.suggest) this.store.set({ searching: false, results: null, panel: 'home' });
-      if (e instanceof Error && e.message === 'places-key') {
-        this.toast(cat.id === 'chargers'
-          ? 'Charger search needs a free Open Charge Map key or a Yandex Places key (Settings → Map data).'
-          : `Finding ${cat.label.toLowerCase()} needs a free Yandex Places key (Settings → Map data).`, 'info', 6500);
-      } else this.toast('Search failed. Try again.', 'err');
+      this.toast('Search failed. Try again.', 'err');
     }
   }
 
-  /** Rank nearby results by real driving time (Distance Matrix) once it arrives. */
+  /** Rank nearby results by real driving time with traffic (Mapbox Matrix) once it arrives. */
   private async addDriveTimes(id: number, near: LngLat, places: Place[], cat: Category) {
     if (!this.matrix || !this.matrix.available) return;
-    const head = places.slice(0, 40);
+    const head = places.slice(0, 18);
     try {
-      const times = await this.matrix.from(near, head.map((p) => p.coord!), this.state.settings.avoidTolls);
+      const times = await this.matrix.from(near, head.map((p) => p.coord!));
       if (id !== this.seq.suggest) return;
       const timed = head.map((p, i) => (times[i] ? { ...p, eta: times[i]!.duration } : p));
       timed.sort((a, b) => (a.eta !== undefined ? a.eta : 1e9) - (b.eta !== undefined ? b.eta : 1e9) || (a.distance || 0) - (b.distance || 0));
-      this.store.set({ results: { title: cat.label, categoryId: cat.id, places: timed.concat(places.slice(40)) } });
+      this.store.set({ results: { title: cat.label, categoryId: cat.id, places: timed.concat(places.slice(18)) } });
     } catch (e) {
       console.warn('[matrix] drive times unavailable', e);
     }
@@ -448,7 +442,7 @@ export class App {
       else routes = await this.routing.route({ points: [this.here(), dest.coord], avoidTolls: s.settings.avoidTolls });
     } catch (e) {
       console.error(e);
-      if (id === this.seq.route) this.store.set({ routing: false, routeError: 'Couldn’t find a driving route. Check your connection or Router key.' });
+      if (id === this.seq.route) this.store.set({ routing: false, routeError: 'Couldn’t find a driving route. Check your connection.' });
       return;
     }
     if (id !== this.seq.route) return;
@@ -460,7 +454,8 @@ export class App {
     this.fitRoute(routes[0]);
     this.planSelected();
     // "via" labels and destination weather — best effort, in the background
-    routes.forEach((r) => this.search.reverse(midpoint(r)).then((rv) => {
+    // Name each route by a road it uses, unless the router already did (Mapbox's summary).
+    routes.filter((r) => !r.via).forEach((r) => this.search.reverse(midpoint(r)).then((rv) => {
       if (rv && id === this.seq.route) { r.via = rv.street || rv.name; this.store.set({ routes: this.state.routes.slice() }); }
     }).catch(() => {}));
     this.weather.get(dest.coord, Date.now() + routes[0].duration * 1000).then((w) => { if (id === this.seq.route) this.store.set({ weatherDest: w }); });
@@ -579,9 +574,13 @@ export class App {
       this.onFix(s.fix);
     }
     this.voice.say(`Starting route to ${dest.name}`);
+    clearInterval(this.trafficTimer);
+    if (this.cfg.mapboxToken && !this.cfg.demo) this.trafficTimer = window.setInterval(() => this.refreshTraffic(), TRAFFIC_REFRESH);
   }
 
   endNavigation() {
+    clearInterval(this.trafficTimer);
+    this.trafficTimer = 0;
     const pos = this.follow.position;
     this.location.stopSimulation();
     this.session = null;
@@ -599,33 +598,92 @@ export class App {
     }
   }
 
+  /** Route from `from` through the charging stops still ahead to the destination. */
+  private routeOnward(from: LngLat) {
+    const s = this.state;
+    const sess = this.session!;
+    const progress = s.nav ? s.nav.progress : 0;
+    const remainingStops = sess.plan ? sess.plan.stops.filter((st) => st.distAlong > progress + 20) : [];
+    const request = this.routing.route({
+      points: [from, ...remainingStops.map((st) => st.place.coord!), s.destination!.coord!],
+      waypointLabels: remainingStops.map((st) => st.place.name),
+      avoidTolls: s.settings.avoidTolls,
+    });
+    return { request, remainingStops };
+  }
+
+  /** Swap the route being driven (reroute, traffic update, faster route). */
+  private adoptRoute(r: RouteResult, remainingStops: ChargeStop[], restartSim: boolean) {
+    const s = this.state;
+    const sess = this.session!;
+    const plan = sess.plan;
+    const v = vehicleById(s.settings.vehicleId);
+    const model = energyModel(r, v, s.settings, undefined, plan ? plan.tempC : undefined);
+    const soc = s.nav && s.nav.socNow !== null ? s.nav.socNow : s.battery;
+    const plan2 = plan ? evaluateStops(r, model, remainingStops, soc, v, s.settings, { tempC: plan.tempC }) : null;
+    sess.setRoute(r, plan2, model);
+    this.follow.setNavigation(r);
+    this.store.set({ navRoute: r, rerouting: false, plan: plan2 });
+    if (restartSim && this.state.simulating) this.location.simulate(r, this.state.simSpeed);
+  }
+
   private async reroute(from: LngLat) {
     const s = this.state;
     const sess = this.session;
     if (!sess || !s.destination || !s.destination.coord) return;
     this.store.set({ rerouting: true });
-    const plan = sess.plan;
-    const progress = s.nav ? s.nav.progress : 0;
-    const remainingStops = plan ? plan.stops.filter((st) => st.distAlong > progress + 20) : [];
     try {
-      const [r] = await this.routing.route({
-        points: [from, ...remainingStops.map((st) => st.place.coord!), s.destination.coord],
-        waypointLabels: remainingStops.map((st) => st.place.name),
-        avoidTolls: s.settings.avoidTolls,
-      });
+      const { request, remainingStops } = this.routeOnward(from);
+      const [r] = await request;
       if (this.session !== sess) return;
-      const v = vehicleById(s.settings.vehicleId);
-      const model = energyModel(r, v, s.settings, undefined, plan ? plan.tempC : undefined);
-      const soc = s.nav && s.nav.socNow !== null ? s.nav.socNow : s.battery;
-      const plan2 = plan ? evaluateStops(r, model, remainingStops, soc, v, s.settings, { tempC: plan.tempC }) : null;
-      sess.setRoute(r, plan2, model);
-      this.follow.setNavigation(r);
-      this.store.set({ navRoute: r, rerouting: false, plan: plan2 });
-      if (this.state.simulating) this.location.simulate(r, this.state.simSpeed);
+      this.adoptRoute(r, remainingStops, true);
     } catch (e) {
       console.error(e);
       this.store.set({ rerouting: false });
       this.toast('Couldn’t reroute — retrying shortly.', 'warn');
+    }
+  }
+
+  /**
+   * Live traffic while driving (Mapbox): every few minutes ask again from where the car is.
+   * Same roads → quietly take the fresh ETA and traffic colours. A different route that saves
+   * at least 3 minutes → switch to it and say so. Otherwise keep going as planned.
+   */
+  private async refreshTraffic() {
+    const s = this.state;
+    const sess = this.session;
+    if (!sess || !s.navigating || s.rerouting || s.arrived || !s.nav || !s.destination || !s.destination.coord) return;
+    const from = this.follow.position || (s.fix && s.fix.coord);
+    if (!from || s.nav.remaining < 800) return;
+    let r: RouteResult;
+    let remainingStops: ChargeStop[];
+    try {
+      const o = this.routeOnward(from);
+      remainingStops = o.remainingStops;
+      [r] = await o.request;
+    } catch (e) {
+      console.warn('[traffic] refresh failed', e);
+      return;
+    }
+    if (this.session !== sess || !this.state.navigating || this.state.rerouting || !r.trafficAware) return;
+    const old = sess.route;
+    const oldLeft = sess.remainingDriveTime();
+    const progress = this.state.nav ? this.state.nav.progress : 0;
+    // Does the new route follow the roads we're already on? Sample it against the current route.
+    const samples = [0.15, 0.35, 0.55, 0.75, 0.95].map((f) => pointAt(r.coords, r.cum, f * r.distance).coord);
+    const same = samples.every((p) => {
+      const pr = projectOnRoute(old.coords, old.cum, p, Math.max(0, progress - 50));
+      return !!pr && pr.offset < 35;
+    });
+    if (same) {
+      this.adoptRoute(r, remainingStops, false);
+      const delta = Math.round((r.duration - oldLeft) / 60);
+      if (Math.abs(delta) >= 3) this.toast(delta > 0 ? `Traffic ahead: ETA ${delta} min later` : `Traffic cleared: ETA ${-delta} min earlier`, delta > 0 ? 'warn' : 'ok', 5000);
+    } else if (r.duration < oldLeft - 180 && r.duration < oldLeft * 0.92) {
+      const saves = Math.round((oldLeft - r.duration) / 60);
+      this.adoptRoute(r, remainingStops, true);
+      this.toast(`Faster route found — saves ${saves} min`, 'ok', 6000);
+      this.voice.say(`Faster route found. It saves ${saves} minutes.`);
     }
   }
 

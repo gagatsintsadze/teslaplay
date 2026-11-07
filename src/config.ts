@@ -2,14 +2,9 @@ import { params } from './core/env';
 import { storage } from './core/storage';
 
 export interface AppConfig {
-  yandexApiKey: string;
-  yandexSuggestKey: string;
-  yandexSearchKey: string;
-  yandexRouterKey: string;
-  /** Geocoder API (geocode-maps.yandex.ru/v1). Falls back to the JS API key on the legacy 1.x endpoint. */
-  yandexGeocoderKey: string;
-  /** Distance Matrix API — drive times for nearby results. */
-  yandexMatrixKey: string;
+  /** Mapbox public token (pk.…): live-traffic routes, traffic on the map, drive times. Optional. */
+  mapboxToken: string;
+  /** Label and search language, e.g. en_US, ka_GE, ru_RU. */
   mapLang: string;
   openChargeMapKey: string;
   demo: boolean;
@@ -24,12 +19,7 @@ declare global {
 }
 
 const DEFAULTS: AppConfig = {
-  yandexApiKey: '',
-  yandexSuggestKey: '',
-  yandexSearchKey: '',
-  yandexRouterKey: '',
-  yandexGeocoderKey: '',
-  yandexMatrixKey: '',
+  mapboxToken: '',
   mapLang: 'en_US',
   openChargeMapKey: '',
   demo: false,
@@ -39,30 +29,19 @@ const DEFAULTS: AppConfig = {
 };
 
 /** Keys a user typed into the app (onboarding / settings) override the deployed config. */
-export type LocalKeys = Partial<Pick<AppConfig, 'yandexApiKey' | 'yandexSuggestKey' | 'yandexSearchKey' | 'yandexRouterKey' | 'yandexGeocoderKey' | 'yandexMatrixKey' | 'openChargeMapKey' | 'mapLang'>>;
+export type LocalKeys = Partial<Pick<AppConfig, 'mapboxToken' | 'openChargeMapKey' | 'mapLang'>>;
 
 export function loadConfig(): AppConfig {
   const fromFile = window.TESLAPLAY_CONFIG || {};
-  const local = storage.get<LocalKeys>('keys', {});
+  const saved = storage.get<Record<string, unknown>>('keys', {});
+  const local: LocalKeys = { mapboxToken: saved.mapboxToken as string, openChargeMapKey: saved.openChargeMapKey as string, mapLang: saved.mapLang as string };
   const cfg: AppConfig = { ...DEFAULTS, ...stripEmpty(fromFile), ...stripEmpty(local) };
   if (params.has('demo')) cfg.demo = params.get('demo') !== '0';
-  if (params.get('key')) cfg.yandexApiKey = params.get('key')!;
+  if (params.get('mapbox')) cfg.mapboxToken = params.get('mapbox')!;
   if (params.get('lang')) cfg.mapLang = params.get('lang')!;
   if (params.has('sim')) cfg.autoSimulate = params.get('sim') !== '0';
   if (params.has('debug')) cfg.debug = true;
   return cfg;
-}
-
-/** The JS API key deployed in config.js (ignores keys saved in this browser). */
-export function deployedApiKey(): string {
-  return ((window.TESLAPLAY_CONFIG || {}) as Partial<AppConfig>).yandexApiKey || '';
-}
-
-/** Forget a JS API key saved in this browser (e.g. one typed into an old version's key screen). */
-export function clearLocalApiKey() {
-  const keys = storage.get<LocalKeys>('keys', {});
-  delete keys.yandexApiKey;
-  storage.set('keys', keys);
 }
 
 export function saveLocalKeys(keys: LocalKeys) {

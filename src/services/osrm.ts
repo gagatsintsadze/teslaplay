@@ -2,9 +2,9 @@ import type { LngLat, RouteResult } from '../types';
 import { buildRoute, type RawStep, type RouteRequest, type RoutingService } from './routing';
 
 /**
- * OpenStreetMap routing via the public OSRM server — used only as a fallback when Yandex
- * routing isn't available on the key. The demo server is for light use; self-host OSRM or
- * enable Yandex routing for production. Returns real step names (street names).
+ * OpenStreetMap routing via the public OSRM server (no traffic) — used without a Mapbox token,
+ * or when Mapbox doesn't answer. The demo server is for light use; self-host OSRM for heavy use.
+ * Returns real step names (street names).
  */
 export class OsrmRouting implements RoutingService {
   constructor(private base = 'https://router.project-osrm.org') {}

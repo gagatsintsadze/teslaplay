@@ -2,8 +2,8 @@ import { angleDiff, bearingBetween, pointAt } from '../core/geo';
 import type { LngLat, Maneuver, ManeuverType } from '../types';
 
 /**
- * Yandex's JS API returns route geometry and step boundaries but no instructions,
- * so maneuvers are reconstructed from the shape of the route:
+ * For routers without turn instructions (OSRM's are used only for names, the demo has none),
+ * maneuvers are reconstructed from the shape of the route:
  *  • with steps: every step boundary is a candidate; its turn angle is measured
  *    from the road bearing 30 m before vs 30 m after the boundary;
  *  • without steps: sharp, concentrated bends in the geometry are detected

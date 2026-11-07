@@ -1,6 +1,5 @@
 import { distance } from '../core/geo';
 import type { LngLat, LngLatBounds, Place } from '../types';
-import type { HttpGeocoder } from './geocoder';
 import type { OsmPlaces } from './osm';
 
 export interface ReverseResult { name: string; street?: string; subtitle?: string }
@@ -22,144 +21,36 @@ const withDistance = (p: Place, near: LngLat | null): Place =>
   near && p.coord ? { ...p, distance: distance(near, p.coord) } : p;
 
 /**
- * Yandex search with graceful degradation, because each Yandex product needs its own key:
- *   1. Geosuggest (`ymaps3.suggest`)   — search-as-you-type      [Geosuggest key]
- *   2. Places/Search (`ymaps3.search`) — businesses, place details [Places key]
- *   3. HTTP Geocoder                   — addresses, streets, cities [the JS API key itself]
- *      + OpenStreetMap (Photon / Overpass) — businesses and categories, no key
- * A product that fails once (no key / not enabled) is skipped for the rest of the session.
+ * Search on OpenStreetMap data — no key, no quota:
+ *  • Photon (komoot): search as you type over places and addresses, biased to where you are
+ *  • Overpass: nearby categories (cafés, parking, pharmacies…)
+ *  • Photon reverse: street names for turn-by-turn and dropped pins
  */
-export class YandexSearch implements SearchService {
-  private suggestBroken = false;
-  private searchBroken = false;
-  onDegraded: ((what: 'suggest' | 'search') => void) | null = null;
+export class OsmSearch implements SearchService {
+  constructor(private osm: OsmPlaces) {}
 
-  constructor(private geocoder: HttpGeocoder, private osm: OsmPlaces) {}
-
-  /** Which provider is currently answering each kind of query (for Settings → Map services). */
-  get providers() {
-    return {
-      suggest: !this.suggestBroken ? 'Yandex Geosuggest' : !this.searchBroken ? 'Yandex Places' : 'Yandex Geocoder + OpenStreetMap',
-      places: !this.searchBroken ? 'Yandex Places' : 'OpenStreetMap',
-    };
-  }
-
-  private get y() { return window.ymaps3; }
-
-  private markBroken(what: 'suggest' | 'search', e: unknown) {
-    console.warn(`[search] Yandex ${what} unavailable on this key, falling back`, e);
-    if (what === 'suggest') this.suggestBroken = true; else this.searchBroken = true;
-    if (this.onDegraded) this.onDegraded(what);
-  }
+  get providers() { return { suggest: 'OpenStreetMap (Photon)', places: 'OpenStreetMap (Overpass)' }; }
 
   async suggest(text: string, near: LngLat | null): Promise<Place[]> {
     const q = text.trim();
     if (!q) return [];
-    if (!this.suggestBroken) {
-      try {
-        const opts: any = { text: q, limit: 8 };
-        if (near) opts.bounds = [[near[0] - 0.3, near[1] + 0.2], [near[0] + 0.3, near[1] - 0.2]];
-        const items: any[] = await timed(this.y.suggest(opts), 'suggest');
-        return (items || []).map((it, i) => {
-          const tags: string[] = it.tags || [];
-          const business = tags.some((t) => /business|бизнес/i.test(t));
-          const place: Place = {
-            id: `sg:${it.uri || i + ':' + (it.title && it.title.text)}`,
-            name: (it.title && it.title.text) || it.value || it.displayName || q,
-            subtitle: it.subtitle && it.subtitle.text,
-            uri: it.uri,
-            kind: business ? 'business' : 'address',
-            distance: it.distance && typeof it.distance.value === 'number' ? it.distance.value : undefined,
-          };
-          return place;
-        });
-      } catch (e) {
-        this.markBroken('suggest', e);
-      }
-    }
-    if (!this.searchBroken) {
-      try { return await this.search(q, near, 8); } catch (e) { this.markBroken('search', e); }
-    }
-    // No Yandex search products on this key: Yandex Geocoder (best for Georgian addresses)
-    // merged with OpenStreetMap (businesses, landmarks).
-    const [geo, osm] = await Promise.all([
-      this.geocoder.search(q, near, 6).catch((e) => { console.warn('[search] geocoder', e); return [] as Place[]; }),
-      this.osm.search(q, near, 8).catch((e) => { console.warn('[search] photon', e); return [] as Place[]; }),
-    ]);
-    return mergePlaces(osm, geo, 8);
-  }
-
-  private async search(text: string, near: LngLat | null, limit: number, extra: any = {}): Promise<Place[]> {
-    const opts: any = { text, limit, ...extra };
-    if (near && !opts.bounds) { opts.center = near; opts.span = opts.span || [0.5, 0.35]; }
-    const feats: any[] = await timed(this.y.search(opts), 'search');
-    return (feats || []).map((f, i) => withDistance(featureToPlace(f, i), near));
+    return (await this.osm.search(q, near, 8)).map((p) => withDistance(p, near));
   }
 
   async resolve(p: Place): Promise<Place> {
     if (p.coord) return p;
-    if (!this.searchBroken) {
-      try {
-        const feats: any[] = p.uri
-          ? await this.y.search({ uri: p.uri })
-          : await this.y.search({ text: [p.name, p.subtitle].filter(Boolean).join(', '), limit: 1 });
-        if (feats && feats.length) {
-          const r = featureToPlace(feats[0], 0);
-          if (r.coord) return { ...p, coord: r.coord, subtitle: p.subtitle || r.subtitle, kind: p.kind || r.kind };
-        }
-      } catch (e) {
-        this.markBroken('search', e);
-      }
-    }
-    const g = await this.geocoder.search([p.subtitle, p.name].filter(Boolean).join(', '), null, 1);
-    if (!g.length || !g[0].coord) throw new Error('Place not found');
-    return { ...p, coord: g[0].coord };
+    const found = await this.osm.search([p.name, p.subtitle].filter(Boolean).join(', '), null, 1);
+    if (!found.length || !found[0].coord) throw new Error('Place not found');
+    return { ...p, coord: found[0].coord };
   }
 
-  async category(id: string, query: string, near: LngLat, bounds?: LngLatBounds): Promise<Place[]> {
-    if (!this.searchBroken) {
-      const extra: any = { type: ['businesses'] };
-      if (bounds) extra.bounds = bounds;
-      else extra.span = [0.06, 0.04];
-      try {
-        const out = await this.search(query, near, 20, extra);
-        return out.sort((a, b) => (a.distance || 0) - (b.distance || 0));
-      } catch (e) {
-        this.markBroken('search', e);
-      }
-    }
+  async category(id: string, _query: string, near: LngLat): Promise<Place[]> {
     return this.osm.nearby(id, near);
   }
 
-  async reverse(coord: LngLat): Promise<ReverseResult | null> {
-    if (!this.searchBroken) {
-      try {
-        const feats: any[] = await this.y.search({ text: `${coord[0]},${coord[1]}`, type: ['toponyms'], limit: 1 });
-        if (feats && feats.length) {
-          const pr = feats[0].properties || {};
-          const name: string = pr.name || '';
-          return { name, street: streetOf(name), subtitle: pr.description };
-        }
-      } catch (e) {
-        this.markBroken('search', e);
-      }
-    }
-    try {
-      const r = await this.geocoder.reverse(coord);
-      if (r) return r;
-    } catch (e) {
-      console.warn('[search] geocoder reverse', e);
-    }
+  reverse(coord: LngLat): Promise<ReverseResult | null> {
     return this.osm.reverse(coord);
   }
-}
-
-/** Reject Yandex calls that hang so the fallbacks get a chance. */
-function timed<T>(p: Promise<T>, what: string, ms = 8000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`Yandex ${what} timed out`)), ms);
-    Promise.resolve(p).then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
-  });
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -172,19 +63,4 @@ export function mergePlaces(a: Place[], b: Place[], limit: number): Place[] {
     for (const p of [a[i], b[i]]) if (p && out.length < limit && !dup(p)) out.push(p);
   }
   return out;
-}
-
-function featureToPlace(f: any, i: number): Place {
-  const pr = f.properties || {};
-  const c = f.geometry && f.geometry.coordinates;
-  const coord: LngLat | undefined = Array.isArray(c) && typeof c[0] === 'number' ? [c[0], c[1]] : undefined;
-  const name = pr.name || pr.title || 'Unnamed place';
-  return {
-    id: `ys:${pr.uri || name + ':' + (coord ? coord.join(',') : i)}`,
-    name,
-    subtitle: pr.description,
-    coord,
-    uri: pr.uri,
-    kind: pr.type === 'business' || pr.companyMetaData || pr.categories ? 'business' : 'address',
-  };
 }

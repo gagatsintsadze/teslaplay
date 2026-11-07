@@ -4,7 +4,7 @@ import { shallowEqualArray } from './core/store';
 import type { MarkerSpec, RouteLine } from './map/engine';
 import { chargerMarker, cityLabel, pinMarker } from './map/markers';
 import { CORRIDOR } from './services/demo-data';
-import type { Place } from './types';
+import type { Place, RouteResult } from './types';
 import { categoryById } from './ui/icons';
 
 /** Keeps the map (routes, pins, insets) in sync with app state. */
@@ -59,18 +59,22 @@ export function bindMap(app: App) {
 
   // ── route lines ──
   let drawnAt = -1e9;
+  // Live-traffic slow stretches of a route from distance `from` on, as drawable pieces.
+  const slowParts = (r: RouteResult, from = 0) => (r.traffic || [])
+    .filter((t) => t.to > from + 1)
+    .map((t) => ({ coords: slice(r.coords, r.cum, Math.max(t.from, from), t.to), level: t.level }));
   const renderRoutes = () => {
     const s = store.get();
     const lines: RouteLine[] = [];
     if (s.navigating && s.navRoute) {
       const r = s.navRoute;
       const p = s.nav ? s.nav.progress : 0;
-      lines.push({ id: 'nav', coords: slice(r.coords, r.cum, p, r.cum[r.cum.length - 1]), role: 'primary' });
+      lines.push({ id: 'nav', coords: slice(r.coords, r.cum, p, r.cum[r.cum.length - 1]), role: 'primary', traffic: slowParts(r, p) });
       drawnAt = p;
     } else if (s.panel === 'planner') {
       s.routes.forEach((r, i) => { if (i !== s.routeIndex) lines.push({ id: r.id, coords: r.coords, role: 'alternative' }); });
       const sel = s.routes[s.routeIndex];
-      if (sel) lines.push({ id: sel.id, coords: sel.coords, role: 'primary' });
+      if (sel) lines.push({ id: sel.id, coords: sel.coords, role: 'primary', traffic: slowParts(sel) });
     }
     engine.setRoutes(lines);
   };

@@ -75,7 +75,6 @@ export function mountSettings(app: App, hud: HTMLElement) {
     }
     rows.push(h('div.set-row', null,
       h('div.label', null, checks ? 'Run again after changing keys' : 'Check what works with these keys', h('small', null, 'Tests the map, search, directions, chargers and GPS from this browser')),
-      h('button.btn.btn-plain.pressable', { onclick: () => window.open('yandex-test.html', '_blank'), style: { minHeight: '2.75rem' } }, 'Yandex key test'),
       checks ? h('button.btn.btn-plain.pressable', { onclick: copyReport, style: { minHeight: '2.75rem' } }, 'Copy report') : null,
       h('button.btn.btn-tinted.pressable', { onclick: runCheck, disabled: checking, style: { minHeight: '2.75rem' } }, checking ? h('span.spinner', { style: { width: '1.1rem', height: '1.1rem', borderWidth: '2px' } }) : null, checking ? 'Checking…' : checks ? 'Check again' : 'Check services'),
     ));
@@ -110,18 +109,17 @@ export function mountSettings(app: App, hud: HTMLElement) {
     };
 
     const keys = { ...app.cfg };
-    const keyInput = (k: 'yandexApiKey' | 'yandexSuggestKey' | 'yandexSearchKey' | 'yandexRouterKey' | 'yandexGeocoderKey' | 'yandexMatrixKey' | 'openChargeMapKey', placeholder: string) => {
+    const keyInput = (k: 'mapboxToken' | 'openChargeMapKey', placeholder: string) => {
       const input = h('input.input', { type: 'text', value: (keys as any)[k] || '', placeholder, autocomplete: 'off', spellcheck: 'false', 'aria-label': placeholder }) as HTMLInputElement;
       input.addEventListener('input', () => { (keys as any)[k] = input.value.trim(); });
       return input;
     };
-    const langSelect = h('select', { 'aria-label': 'Map language' }, ...[['en_US', 'English'], ['ru_RU', 'Русский'], ['en_RU', 'English (RU data)'], ['uk_UA', 'Українська'], ['tr_TR', 'Türkçe']].map(([val, label]) => h('option', { value: val, selected: val === app.cfg.mapLang }, label))) as HTMLSelectElement;
+    const langSelect = h('select', { 'aria-label': 'Map language' }, ...[['en_US', 'English'], ['ka_GE', 'ქართული'], ['ru_RU', 'Русский'], ['uk_UA', 'Українська'], ['tr_TR', 'Türkçe']].map(([val, label]) => h('option', { value: val, selected: val === app.cfg.mapLang }, label))) as HTMLSelectElement;
     langSelect.addEventListener('change', () => { keys.mapLang = langSelect.value; });
 
     mount(body,
       group('Appearance',
         row('Map appearance', st.themeMode === 'auto' ? 'Follows sunrise and sunset' : null, seg('theme', st.themeMode, [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']], (m) => set({ themeMode: m }))),
-        ...(app.engine.kind === 'yandex' ? [row('Road style', 'Drive: asphalt roads with lane markings', seg('roads', st.roadStyle, [['drive', 'Drive'], ['classic', 'Yandex']], (r) => set({ roadStyle: r })))] : []),
         row('Text size', null, seg('text', st.textSize, [['standard', 'Standard'], ['large', 'Large'], ['larger', 'Larger']], (t) => set({ textSize: t }))),
         row('Driver side', 'Where cards and guidance appear', seg('side', st.driverSide, [['left', 'Left'], ['right', 'Right']], (d) => set({ driverSide: d }))),
         row('Glass', glassNote(s.material, st.glass), seg('glass', st.glass, [['auto', 'Auto'], ['liquid', 'Liquid'], ['frosted', 'Frosted'], ['solid', 'Solid']], (g) => set({ glass: g }))),
@@ -130,7 +128,7 @@ export function mountSettings(app: App, hud: HTMLElement) {
         row('Voice guidance', app.voice.canSpeak ? null : 'No speech voice in this browser — chimes instead', sw(st.voice, () => set({ voice: !st.voice }), 'Voice guidance')),
         row('Avoid tolls', null, sw(st.avoidTolls, () => set({ avoidTolls: !st.avoidTolls }), 'Avoid tolls')),
         row('3D perspective', 'Tilted map with buildings while driving', sw(st.view3D, () => set({ view3D: !st.view3D }), '3D perspective')),
-        row('Live traffic', s.trafficAvailable ? null : 'Requires a paid Yandex plan', sw(st.traffic && s.trafficAvailable, () => set({ traffic: !st.traffic }), 'Live traffic')),
+        row('Live traffic', s.trafficAvailable ? 'Mapbox · updates every few minutes' : 'Add a Mapbox token under Map data', sw(st.traffic && s.trafficAvailable, () => set({ traffic: !st.traffic }), 'Live traffic')),
         row('Units', null, seg('units', st.units, [['metric', 'Kilometres'], ['imperial', 'Miles']], (u) => set({ units: u }))),
       ),
       group('Vehicle & charging',
@@ -143,24 +141,19 @@ export function mountSettings(app: App, hud: HTMLElement) {
       h('div.set-foot', null, 'Range estimates use speed, outside temperature and elevation. Tune consumption to match your car’s trip meter for best accuracy.'),
       group('Map services', ...servicesGroup(row)),
       group('Map data',
-        row('Yandex JS API key', 'Required for the live map', keyInput('yandexApiKey', 'JS API v3 key')),
-        row('Geosuggest key', 'Optional · Yandex search as you type', keyInput('yandexSuggestKey', 'Same as JS key')),
-        row('Search (Places) key', 'Optional · Yandex businesses and categories', keyInput('yandexSearchKey', 'Same as JS key')),
-        row('Router API key', 'Yandex routes with live traffic', keyInput('yandexRouterKey', 'Router API key')),
-        row('Geocoder API key', 'Addresses and street names', keyInput('yandexGeocoderKey', 'Geocoder API key')),
-        row('Distance Matrix key', 'Drive times on nearby results', keyInput('yandexMatrixKey', 'Distance Matrix key')),
+        row('Mapbox token', 'Live traffic: routes, ETAs and traffic on the map', keyInput('mapboxToken', 'pk.…')),
         row('Open Charge Map key', 'Charger power & connectors', keyInput('openChargeMapKey', 'Free key')),
         row('Map language', null, langSelect),
         h('div.set-row', null, h('div.label'), h('button.btn.btn-primary.pressable', {
           onclick: () => {
-            saveLocalKeys({ yandexApiKey: keys.yandexApiKey, yandexSuggestKey: keys.yandexSuggestKey, yandexSearchKey: keys.yandexSearchKey, yandexRouterKey: keys.yandexRouterKey, yandexGeocoderKey: keys.yandexGeocoderKey, yandexMatrixKey: keys.yandexMatrixKey, openChargeMapKey: keys.openChargeMapKey, mapLang: keys.mapLang });
+            saveLocalKeys({ mapboxToken: keys.mapboxToken, openChargeMapKey: keys.openChargeMapKey, mapLang: keys.mapLang });
             const url = new URL(location.href);
             url.searchParams.delete('demo');
             location.href = url.toString();
           },
         }, 'Save & reload')),
       ),
-      h('div.set-foot', null, 'Without the optional keys, search uses the Yandex Geocoder plus OpenStreetMap, directions use OpenStreetMap routing, and chargers come from OpenStreetMap. Keys entered here are stored only in this browser; for a deployment put them in config.js and restrict them to your domain in the Yandex Developer Dashboard.'),
+      h('div.set-foot', null, 'Without a Mapbox token, directions use OpenStreetMap routing without traffic. Search, places and chargers always come from OpenStreetMap. Keys entered here are stored only in this browser; for a deployment put them in config.js and restrict the Mapbox token to your domain (account.mapbox.com → Tokens → URL restrictions).'),
       group('Developer',
         row('Simulation controls', 'Adds “Simulate” next to Go', sw(st.devTools, () => set({ devTools: !st.devTools }), 'Simulation controls')),
         row('Demo mode', s.demo ? 'Running with sample data' : 'Offline map with sample data', h('button.btn.btn-plain.pressable', {
@@ -169,7 +162,7 @@ export function mountSettings(app: App, hud: HTMLElement) {
         }, s.demo ? 'Exit demo' : 'Open demo')),
       ),
       h('div.set-foot', null,
-        icon('info', 14), ` Teslaplay 0.1 (build ${typeof __BUILD__ === 'string' ? __BUILD__ : 'dev'}) · Maps, search and routing © Yandex · Weather & elevation: Open-Meteo · Chargers: Open Charge Map, OpenStreetMap. Backup map: MapLibre, © CARTO, © OpenStreetMap contributors. `,
+        icon('info', 14), ` Teslaplay 0.1 (build ${typeof __BUILD__ === 'string' ? __BUILD__ : 'dev'}) · Map: MapLibre, OpenFreeMap, © OpenStreetMap contributors · Live traffic: © Mapbox · Routing without traffic: OSRM · Search: Photon, Overpass · Weather & elevation: Open-Meteo · Chargers: Open Charge Map, OpenStreetMap. `,
         isTesla ? `Tesla browser detected${teslaFirmware ? ` (${teslaFirmware})` : ''}.` : '',
       ),
     );

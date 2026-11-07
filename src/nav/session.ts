@@ -164,7 +164,8 @@ export class NavigationSession {
     });
   }
 
-  private remainingDriveTime(d: number): number {
+  /** Driving seconds left from distance `d` along the route (step durations, so traffic-heavy stretches count). */
+  remainingDriveTime(d: number = this.progress): number {
     const r = this.route;
     const total = this.total;
     if (!r.steps.length) return r.duration * Math.max(0, 1 - d / total);

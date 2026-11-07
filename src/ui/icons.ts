@@ -75,7 +75,7 @@ export function icon(name: string, size = 22, extraClass = ''): SVGElement {
 /** Category metadata shared by search chips, result rows and pins. */
 export interface Category { id: string; label: string; icon: string; color: string; query: string }
 
-// Queries are in Russian: Yandex's business index for Georgia is densest in RU; labels stay English.
+// Category queries (search uses OpenStreetMap tags for these; the text is kept for the demo data).
 export const CATEGORIES: Category[] = [
   { id: 'chargers', label: 'Chargers', icon: 'bolt', color: '#30d158', query: 'зарядная станция для электромобилей' },
   { id: 'parking', label: 'Parking', icon: 'parking', color: '#0a84ff', query: 'парковка' },

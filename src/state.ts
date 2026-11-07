@@ -82,7 +82,6 @@ export const DEFAULT_SETTINGS: Settings = {
   textSize: isTesla ? 'large' : 'standard',
   traffic: true,
   view3D: true,
-  roadStyle: 'drive',
   devTools: false,
 };
 

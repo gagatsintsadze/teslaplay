@@ -1,5 +1,5 @@
-import { cumulative, distance, projectOnRoute } from '../core/geo';
-import type { LngLat, RouteResult, RouteStep } from '../types';
+import { cumulative, pointAt, projectOnRoute } from '../core/geo';
+import type { LngLat, Maneuver, ManeuverType, RouteResult, RouteStep } from '../types';
 import { deriveManeuvers } from './maneuvers';
 
 export interface RouteRequest {
@@ -18,7 +18,7 @@ let seq = 0;
 /** Normalise a raw route (from any provider) into the app's RouteResult. */
 export function buildRoute(
   coords: LngLat[], rawDistance: number | undefined, rawDuration: number | undefined, hasTolls: boolean,
-  rawSteps: RawStep[], req: RouteRequest,
+  rawSteps: RawStep[], req: RouteRequest, rawManeuvers?: RawManeuver[],
 ): RouteResult {
   const cum = cumulative(coords);
   const total = cum[cum.length - 1];
@@ -56,14 +56,13 @@ export function buildRoute(
     if (p) wFrom = p.d;
   });
 
-  const maneuvers = deriveManeuvers(
-    coords, cum, steps.map((s) => s.startDist),
-    waypointDists.map((at, i) => ({ at, label: (req.waypointLabels && req.waypointLabels[i]) || 'Stop' })),
-  );
+  const stops = waypointDists.map((at, i) => ({ at, label: (req.waypointLabels && req.waypointLabels[i]) || 'Stop' }));
+  // Routers with real instructions (Mapbox) place their own maneuvers; otherwise rebuild them from the geometry.
+  const maneuvers = rawManeuvers ? placeManeuvers(coords, cum, rawManeuvers, stops) : deriveManeuvers(coords, cum, steps.map((s) => s.startDist), stops);
 
   // Routers that name their steps (OSRM) give street names for free.
   for (const m of maneuvers) {
-    if (m.type === 'depart' || m.type === 'arrive' || m.type === 'waypoint') continue;
+    if (m.type === 'depart' || m.type === 'arrive' || m.type === 'waypoint' || m.street) continue;
     const st = steps.find((s) => s.name && Math.abs(s.startDist - m.at) < 40);
     if (st) m.street = st.name;
   }
@@ -73,11 +72,30 @@ export function buildRoute(
 
 export interface RawStep { coords: LngLat[]; distance?: number; duration?: number; name?: string }
 
+/** A maneuver as the router describes it, located by coordinate. */
+export interface RawManeuver { coord: LngLat; type: ManeuverType; angle: number; street?: string; instruction?: string }
+
+function placeManeuvers(coords: LngLat[], cum: number[], raw: RawManeuver[], stops: { at: number; label: string }[]): Maneuver[] {
+  const total = cum[cum.length - 1];
+  const out: Maneuver[] = [{ type: 'depart', angle: 0, at: 0, coord: coords[0] }];
+  let from = 0;
+  for (const m of raw) {
+    const p = projectOnRoute(coords, cum, m.coord, from, from + 50000);
+    if (!p || p.d < 5 || p.d > total - 5) continue;
+    from = p.d;
+    out.push({ type: m.type, angle: m.angle, at: p.d, coord: m.coord, street: m.street, instruction: m.instruction });
+  }
+  for (const w of stops) out.push({ type: 'waypoint', angle: 0, at: w.at, coord: pointAt(coords, cum, w.at).coord, label: w.label });
+  out.sort((a, b) => a.at - b.at);
+  out.push({ type: 'arrive', angle: 0, at: total, coord: coords[coords.length - 1] });
+  return out;
+}
+
 export interface NamedRouter { name: string; router: RoutingService }
 
 /**
- * Tries routers in order per request (Yandex via the JS API, Yandex Router API over HTTP,
- * OpenStreetMap). A router that fails twice in a row is skipped for the rest of the session.
+ * Tries routers in order per request (Mapbox live traffic, then OpenStreetMap/OSRM).
+ * A router that fails twice in a row is skipped for the rest of the session.
  * `onFallback` fires when a request had to use the last router.
  */
 export class FallbackRouting implements RoutingService {
@@ -104,90 +122,5 @@ export class FallbackRouting implements RoutingService {
       }
     }
     throw last instanceof Error ? last : new Error('No route found');
-  }
-}
-
-function extractCoords(geometry: any): LngLat[] {
-  if (!geometry) return [];
-  if (geometry.type === 'LineString') return geometry.coordinates as LngLat[];
-  if (geometry.type === 'MultiLineString') return ([] as LngLat[]).concat(...(geometry.coordinates as LngLat[][]));
-  return [];
-}
-
-/** Driving routes via Yandex JS API v3 `ymaps3.route` (traffic-aware on Yandex's side). */
-export class YandexRouting implements RoutingService {
-  async route(req: RouteRequest): Promise<RouteResult[]> {
-    const y = window.ymaps3;
-    if (!y || typeof y.route !== 'function') throw new Error('Yandex JS API not loaded');
-    const res = await y.route({ points: req.points, type: 'driving', bounds: true, avoidTolls: req.avoidTolls });
-    const list: any[] = Array.isArray(res) ? res : [res];
-    const out: RouteResult[] = [];
-    for (const r of list.slice(0, 3)) {
-      let feature: any;
-      try { feature = r.toRoute(); } catch { continue; }
-      const coords = extractCoords(feature && feature.geometry);
-      if (coords.length < 2) continue;
-      const props = feature.properties || {};
-      let rawSteps: RawStep[] = [];
-      try {
-        const steps: any[] = typeof r.toSteps === 'function' ? r.toSteps() : [];
-        rawSteps = steps.map((s) => ({
-          coords: extractCoords(s.geometry),
-          distance: s.properties && s.properties.length,
-          duration: s.properties && s.properties.duration,
-        }));
-      } catch { /* steps are optional */ }
-      const flags = props.flags || {};
-      // `length` / `duration` are optional on the route feature; Yandex's own route control sums the steps.
-      const sum = (k: 'distance' | 'duration') => rawSteps.reduce((a, st) => a + (st[k] || 0), 0);
-      const length = typeof props.length === 'number' && props.length > 0 ? props.length : sum('distance');
-      const duration = typeof props.duration === 'number' && props.duration > 0 ? props.duration : sum('duration');
-      out.push(buildRoute(coords, length, duration, !!(flags.hasTolls || flags.hasNonTransactionalTolls), rawSteps, req));
-    }
-    if (!out.length) throw new Error('No route found');
-    // Distinct alternatives only.
-    return out.filter((r, i) => i === 0 || Math.abs(r.distance - out[0].distance) > 50 || distance(r.coords[r.coords.length >> 1], out[0].coords[out[0].coords.length >> 1]) > 100);
-  }
-}
-
-/**
- * Yandex Router API over plain HTTP — the same traffic-aware routes without needing the JS map,
- * so directions stay Yandex-quality even when the map falls back to OpenStreetMap.
- * Polyline points come back as [lat, lon].
- */
-export class YandexRouterHttp implements RoutingService {
-  constructor(private key: string) {}
-
-  async route(req: RouteRequest): Promise<RouteResult[]> {
-    const qs = new URLSearchParams({
-      apikey: this.key,
-      waypoints: req.points.map((p) => `${p[1].toFixed(6)},${p[0].toFixed(6)}`).join('|'),
-      mode: 'driving',
-    });
-    if (req.avoidTolls) qs.set('avoid_tolls', 'true');
-    const r = await fetch(`https://api.routing.yandex.net/v2/route?${qs}`);
-    if (!r.ok) throw new Error(`Router API ${r.status}`);
-    const j = await r.json();
-    if (j && j.errors && j.errors.length) throw new Error(String(j.errors[0]));
-    const legs: any[] = (j && j.route && j.route.legs) || [];
-    if (!legs.length || legs.some((l) => l.status && l.status !== 'OK')) throw new Error('No route found');
-    const coords: LngLat[] = [];
-    const steps: RawStep[] = [];
-    let length = 0;
-    let duration = 0;
-    for (const leg of legs) {
-      for (const st of leg.steps || []) {
-        const pts: LngLat[] = ((st.polyline && st.polyline.points) || []).map((p: number[]) => [p[1], p[0]] as LngLat);
-        if (pts.length < 2) continue;
-        const last = coords[coords.length - 1];
-        coords.push(...(last && last[0] === pts[0][0] && last[1] === pts[0][1] ? pts.slice(1) : pts));
-        steps.push({ coords: pts, distance: st.length, duration: (st.duration || 0) + (st.waiting_duration || 0) });
-        length += st.length || 0;
-        duration += (st.duration || 0) + (st.waiting_duration || 0);
-      }
-    }
-    if (coords.length < 2) throw new Error('No route found');
-    const flags = (j.route && j.route.flags) || {};
-    return [buildRoute(coords, length, duration, !!(flags.hasTolls || flags.hasNonTransactionalTolls), steps, req)];
   }
 }

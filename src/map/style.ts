@@ -58,9 +58,10 @@ const metres = (w: any, extraM = 0): any => {
 const fixedM = (m: number, minPx: number): any => ['interpolate', ['exponential', 2], ['zoom'],
   14, Math.max(minPx, m * 2 ** 14 * PX_PER_M_Z0), 20, Math.max(minPx, m * 2 ** 20 * PX_PER_M_Z0)];
 
-/** Label in the map language: English (or OSM's Latin transliteration) for en, else local/Russian. */
+/** Label in the map language: English (or OSM's Latin transliteration) for en, else that language, then local. */
 export function labelExpr(lang: string): any {
   const l = lang.slice(0, 2).toLowerCase();
+  if (l === 'ka') return ['coalesce', ['get', 'name:ka'], ['get', 'name']];
   if (l === 'ru') return ['coalesce', ['get', 'name:ru'], ['get', 'name']];
   if (l === 'uk') return ['coalesce', ['get', 'name:uk'], ['get', 'name:ru'], ['get', 'name']];
   if (l === 'tr') return ['coalesce', ['get', 'name:tr'], ['get', 'name:latin'], ['get', 'name']];

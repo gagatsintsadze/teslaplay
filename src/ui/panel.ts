@@ -178,7 +178,7 @@ function placeView(app: App, p: Place): Node[] {
 
   const share = () => {
     if (!p.coord) return;
-    const url = `https://yandex.com/maps/?pt=${p.coord[0].toFixed(6)},${p.coord[1].toFixed(6)}&z=17&l=map`;
+    const url = `https://www.google.com/maps/search/?api=1&query=${p.coord[1].toFixed(6)},${p.coord[0].toFixed(6)}`;
     const done = () => app.toast('Link copied', 'ok');
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, () => app.toast(url, 'info', 6000));
     else app.toast(url, 'info', 6000);
@@ -194,7 +194,7 @@ function placeView(app: App, p: Place): Node[] {
     if (c.points) info.push(infoRow('Charge points', String(c.points)));
     if (c.cost) info.push(infoRow('Cost', c.cost));
     if (c.operator && c.operator !== p.name) info.push(infoRow('Operator', c.operator));
-    info.push(infoRow('Source', c.source === 'ocm' ? 'Open Charge Map' : c.source === 'osm' ? 'OpenStreetMap' : c.source === 'yandex' ? 'Yandex Maps' : 'Demo data'));
+    info.push(infoRow('Source', c.source === 'ocm' ? 'Open Charge Map' : c.source === 'osm' ? 'OpenStreetMap' : 'Demo data'));
   }
   if (p.coord) info.push(infoRow('Coordinates', `${p.coord[1].toFixed(5)}, ${p.coord[0].toFixed(5)}`));
 

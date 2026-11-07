@@ -1,8 +1,7 @@
 import type { App } from '../app';
 import type { LngLat } from '../types';
-import { HttpGeocoder } from './geocoder';
+import { checkMapboxToken } from './mapbox';
 import { OsrmRouting } from './osrm';
-import { YandexRouterHttp } from './routing';
 
 export interface CheckResult {
   id: string;
@@ -44,60 +43,41 @@ export async function runServiceCheck(app: App): Promise<CheckResult[]> {
   const cfg = app.cfg;
   const here = app.here();
   const near: LngLat = [here[0] + 0.012, here[1] + 0.006];
-  const y = window.ymaps3;
-  const live = app.engine.kind === 'yandex';
+  const token = cfg.mapboxToken;
+  const live = !cfg.demo;
 
   const checks: Promise<CheckResult>[] = [];
   const add = (id: string, name: string, fn: (() => Promise<string>) | null, skipped = 'Not configured') => {
     checks.push(fn ? timed(fn).then((r) => ({ id, name, ...r })) : Promise.resolve({ id, name, ok: null, detail: skipped }));
   };
 
-  add('map', 'Yandex map', live ? async () => {
-    if (!y) throw new Error('JS API not loaded');
-    const warn = (app.engine as any).initWarnings as string[] | undefined;
-    return `JS API v3 loaded${y.version ? ` (${y.version})` : ''} · key …${cfg.yandexApiKey.slice(-4)}${warn && warn.length ? ` · refused: ${warn.join('; ')}` : ''}`;
-  } : app.engine.kind === 'osm' ? async () => { throw new Error(app.mapFallbackReason || 'Not loaded'); } : null, 'Demo mode — offline map');
-  if (app.engine.kind === 'osm') add('osmmap', 'OpenStreetMap map', async () => 'Showing CARTO / OpenStreetMap tiles');
+  add('map', 'Map tiles (OpenFreeMap)', live ? async () => {
+    const r = await fetch('https://tiles.openfreemap.org/planet');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    return `OpenStreetMap data${j.version ? ` · ${j.version}` : ''}`;
+  } : null, 'Demo mode — offline map');
 
-  add('suggest', 'Yandex Geosuggest', live && y ? async () => {
-    const r: any[] = await y.suggest({ text: 'Rustaveli', limit: 1 });
-    return r && r.length ? `“${r[0].title && r[0].title.text}”` : 'Answered, no results';
-  } : null);
+  add('mapbox', 'Mapbox live-traffic routes', live && token ? async () => checkMapboxToken(token, here, near) : null,
+    'No Mapbox token — routes without traffic');
 
-  add('search', 'Yandex Places search', live && y ? async () => {
-    const r: any[] = await y.search({ text: 'cafe', center: here, span: [0.05, 0.03], type: ['businesses'], limit: 1 });
-    return r && r.length ? `“${r[0].properties && r[0].properties.name}”` : 'Answered, no results';
-  } : null);
+  add('traffic', 'Mapbox traffic on the map', live && token ? async () => {
+    // One real traffic tile where you are (zoom 14).
+    const z = 14;
+    const x = Math.floor(((here[0] + 180) / 360) * 2 ** z);
+    const lat = (here[1] * Math.PI) / 180;
+    const yy = Math.floor(((1 - Math.log(Math.tan(lat) + 1 / Math.cos(lat)) / Math.PI) / 2) * 2 ** z);
+    const r = await fetch(`https://api.mapbox.com/v4/mapbox.mapbox-traffic-v1/${z}/${x}/${yy}.vector.pbf?access_token=${encodeURIComponent(token)}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}${r.status === 401 || r.status === 403 ? ' — token refused (check URL restrictions)' : ''}`);
+    const kb = ((await r.arrayBuffer()).byteLength / 1024).toFixed(1);
+    return `${kb} KB of traffic here · ${app.state.settings.traffic ? 'shown on the map' : 'switched off in Settings'}`;
+  } : null, 'No Mapbox token');
 
-  add('routerhttp', 'Yandex Router API', cfg.yandexRouterKey && !cfg.demo ? async () => {
-    const r = await new YandexRouterHttp(cfg.yandexRouterKey).route({ points: [here, near], avoidTolls: false });
-    return `${r[0].coords.length} points · ${Math.max(1, Math.round(r[0].duration / 60))} min with traffic`;
-  } : null);
-
-  add('router', 'Yandex routing (JS API)', live && y ? async () => {
-    const r: any[] = await y.route({ points: [here, near], type: 'driving' });
-    const f = r && r[0] && r[0].toRoute();
-    const n = f && f.geometry && f.geometry.coordinates ? f.geometry.coordinates.length : 0;
-    if (!n) throw new Error('Empty route');
-    return `${n} points${f.properties && f.properties.duration ? ` · ${Math.round(f.properties.duration / 60)} min` : ''}`;
-  } : null);
-
-  add('geocoder', 'Yandex Geocoder', cfg.yandexApiKey && !cfg.demo ? async () => {
-    const g = app.geocoder || new HttpGeocoder(cfg.yandexGeocoderKey || cfg.yandexApiKey, cfg.mapLang, cfg.yandexApiKey);
-    const r = await g.search('Tbilisi', null, 1);
-    return `${r.length ? `“${r[0].name}”` : 'Answered, no results'} · ${g.endpoint}`;
-  } : null);
-
-  add('matrix', 'Yandex Distance Matrix', app.matrix ? async () => {
-    const r = await app.matrix!.from(here, [near]);
-    if (!r[0]) throw new Error('No time returned');
-    return `${Math.max(1, Math.round(r[0].duration / 60))} min drive to a point ${(r[0].distance / 1000).toFixed(1)} km away`;
-  } : null);
-
-  add('traffic', 'Yandex live traffic', live ? async () => {
-    if (!app.state.trafficAvailable) throw new Error('Needs a paid Yandex plan');
-    return app.state.settings.traffic ? 'On' : 'Available (switched off)';
-  } : null);
+  add('matrix', 'Mapbox drive times', app.matrix ? async () => {
+    const [t] = await app.matrix!.from(here, [near]);
+    if (!t) throw new Error('No route between test points');
+    return `${Math.round(t.duration / 60)} min to a point ${(t.distance / 1000).toFixed(1)} km away`;
+  } : null, 'No Mapbox token — nearby results sorted by distance');
 
   add('osrm', 'OpenStreetMap routing', async () => {
     const r = await new OsrmRouting().route({ points: [here, near], avoidTolls: false });
@@ -144,11 +124,12 @@ export function activeProviders(app: App, results: CheckResult[]): { label: stri
   const ok = (id: string) => results.some((r) => r.id === id && r.ok);
   const has = (id: string) => results.some((r) => r.id === id);
   return [
-    { label: 'Map', value: ok('map') ? 'Yandex' : ok('osmmap') ? 'OpenStreetMap (backup)' : app.cfg.demo ? 'Demo' : 'Not loaded' },
-    { label: 'Search as you type', value: ok('suggest') ? 'Yandex Geosuggest' : ok('search') ? 'Yandex Places' : [ok('geocoder') && 'Yandex Geocoder', ok('photon') && 'OpenStreetMap'].filter(Boolean).join(' + ') || 'Unavailable' },
-    { label: 'Nearby places', value: (ok('search') ? 'Yandex Places' : ok('overpass') ? 'OpenStreetMap' : 'Unavailable') + (ok('matrix') ? ' · drive times by Yandex' : '') },
-    { label: 'Directions', value: ok('router') || ok('routerhttp') ? 'Yandex (live traffic)' : ok('osrm') ? 'OpenStreetMap (OSRM)' : 'Unavailable' },
-    { label: 'EV chargers', value: ok('ocm') ? 'Open Charge Map' : ok('overpass') ? 'OpenStreetMap' : ok('search') ? 'Yandex Places' : has('ocm') ? 'Unavailable' : 'Unavailable' },
+    { label: 'Map', value: app.cfg.demo ? 'Demo' : ok('map') ? 'OpenStreetMap (Drive style)' : 'Not loading' },
+    { label: 'Directions', value: ok('mapbox') ? 'Mapbox — live traffic' : ok('osrm') ? 'OpenStreetMap (OSRM) — no traffic' : 'Unavailable' },
+    { label: 'Traffic on the map', value: ok('traffic') ? 'Mapbox' : 'Off' },
+    { label: 'Search', value: ok('photon') ? 'OpenStreetMap (Photon)' : 'Unavailable' },
+    { label: 'Nearby places', value: (ok('overpass') ? 'OpenStreetMap' : 'Unavailable') + (ok('matrix') ? ' · drive times by Mapbox' : '') },
+    { label: 'EV chargers', value: ok('ocm') ? 'Open Charge Map' : ok('overpass') ? 'OpenStreetMap' : has('ocm') ? 'Unavailable' : 'Unavailable' },
   ];
 }
 

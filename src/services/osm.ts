@@ -3,7 +3,7 @@ import type { ChargerInfo, LngLat, Place, RouteResult } from '../types';
 import type { ReverseResult } from './search';
 
 /**
- * OpenStreetMap services that need no key — the safety net behind Yandex's separately-keyed products:
+ * OpenStreetMap services that need no key:
  *  - Photon (komoot): search-as-you-type over places *and* addresses, with location bias
  *  - Overpass: nearby categories (cafés, parking, pharmacies…) and EV chargers along a route
  * Both send CORS headers, so they work straight from the browser.

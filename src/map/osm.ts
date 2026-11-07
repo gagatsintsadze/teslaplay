@@ -1,6 +1,7 @@
 import type { LngLat, LngLatBounds } from '../types';
 import type { MapClick, MapEngine, MarkerSpec, Padding, RouteLine, ViewRequest, ViewState } from './engine';
 import { attachGestureWatcher } from './gestures';
+import { trafficTilesUrl } from '../services/mapbox';
 import { buildStyle } from './style';
 
 declare global {
@@ -8,8 +9,8 @@ declare global {
 }
 
 /**
- * OpenStreetMap vector map (MapLibre GL JS + CARTO basemaps) — used whenever the Yandex map can't
- * load (key not allowed on this site, blocked, offline Yandex), so the app always has a real map.
+ * The map: OpenStreetMap vector tiles (OpenFreeMap) rendered by MapLibre GL JS in our own "Drive"
+ * style, plus Mapbox live traffic on the roads when a token is configured.
  * MapLibre is self-hosted under vendor/ and only downloaded when needed.
  */
 
@@ -48,9 +49,15 @@ const ROUTE_LAYERS: { id: string; role: string; part: 'casing' | 'fill' }[] = [
   { id: 'tp-route-pri-fill', role: 'primary', part: 'fill' },
 ];
 
+/** Road widths in the style's units (see style.ts ROAD_W) by Mapbox Traffic `class`. */
+const TRAFFIC_UNITS: any = ['match', ['get', 'class'], ['motorway', 'motorway_link'], 22, ['trunk', 'trunk_link'], 20, ['primary', 'primary_link'], 16, 'secondary', 13, 'tertiary', 10.5, 'service', 5, 8];
+const byZoom = (k: number, minPx: number): any => ['interpolate', ['exponential', 2], ['zoom'],
+  11, minPx, 16, ['max', minPx, ['*', TRAFFIC_UNITS, (k * 2 ** 16) / 116860]], 20, ['max', minPx, ['*', TRAFFIC_UNITS, (k * 2 ** 20) / 116860]]];
+const TRAFFIC_REFRESH = 8 * 60e3; // Mapbox updates congestion about every 8 minutes
+const SLOW_COLORS: Record<number, string> = { 2: '#ff9f0a', 3: '#ff453a', 4: '#c4161c' };
+
 export class OsmEngine implements MapEngine {
   readonly kind = 'osm' as const;
-  readonly supportsTraffic = false;
   readonly maxTilt = 62;
   private gl: any;
   private map: any;
@@ -67,7 +74,14 @@ export class OsmEngine implements MapEngine {
   private ahead: LngLat[] | null = null;
   private maneuver: LngLat[] | null = null;
 
-  constructor(private lang = 'en_US') {}
+  private trafficOn = false;
+  private trafficTimer = 0;
+  /** Called when Mapbox refuses the traffic tiles (bad or restricted token). */
+  onTrafficError: ((message: string) => void) | null = null;
+
+  constructor(private lang = 'en_US', private mapboxToken = '') {}
+
+  get supportsTraffic() { return !!this.mapboxToken; }
 
   async init(container: HTMLElement, opts: { center: LngLat; zoom: number; theme: 'light' | 'dark' }) {
     const gl = (this.gl = await loadMapLibre());
@@ -89,7 +103,13 @@ export class OsmEngine implements MapEngine {
     await new Promise<void>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error('OpenStreetMap map timed out')), LOAD_TIMEOUT);
       map.once('load', () => { clearTimeout(t); resolve(); });
-      map.on('error', (e: any) => console.warn('[osm map]', e && e.error ? e.error.message || e.error : e));
+      map.on('error', (e: any) => {
+        console.warn('[osm map]', e && e.error ? e.error.message || e.error : e);
+        const status = e && e.error && e.error.status;
+        if (e && e.sourceId === 'tp-traffic' && (status === 401 || status === 403) && this.onTrafficError) {
+          this.onTrafficError(`Mapbox refused the traffic tiles (${status}) — check the token and its URL restrictions.`);
+        }
+      });
     });
     this.decorateStyle();
     map.on('style.load', () => this.decorateStyle());
@@ -133,6 +153,16 @@ export class OsmEngine implements MapEngine {
       }, before);
     }
 
+    // Slow stretches of the active route, painted over its blue fill.
+    if (!map.getSource('tp-route-traffic')) {
+      map.addSource('tp-route-traffic', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.addLayer({
+        id: 'tp-route-traffic', type: 'line', source: 'tp-route-traffic',
+        layout: { 'line-join': 'round', 'line-cap': 'butt' },
+        paint: { 'line-color': ['match', ['get', 'level'], 4, SLOW_COLORS[4], 3, SLOW_COLORS[3], SLOW_COLORS[2]], 'line-width': 6 },
+      }, map.getLayer('tp-route-chevrons') ? 'tp-route-chevrons' : before);
+    }
+
     // Ghost copy of the buildings: those standing on the route ahead, low and see-through.
     if (map.getLayer('tp-buildings') && !map.getLayer('tp-buildings-ghost')) {
       const b = map.getLayer('tp-buildings');
@@ -159,8 +189,48 @@ export class OsmEngine implements MapEngine {
       map.addLayer({ id: 'tp-mv-head-casing', type: 'line', source: 'tp-mv', filter: ['==', ['geometry-type'], 'Polygon'], layout: { 'line-join': 'round' }, paint: { 'line-color': '#0b4fc4', 'line-width': w(1, 2.5) } });
       map.addLayer({ id: 'tp-mv-head', type: 'fill', source: 'tp-mv', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#ffffff' } });
     }
+    this.applyTraffic();
     this.paintRoutes();
     this.applyNavOverlay();
+  }
+
+  /** Mapbox Traffic v1: congestion lines on each side of the road, beneath the route and buildings. */
+  private applyTraffic() {
+    const map = this.map;
+    if (!map || !map.getStyle() || !this.mapboxToken) return;
+    if (this.trafficOn && !map.getSource('tp-traffic')) {
+      map.addSource('tp-traffic', {
+        type: 'vector', tiles: [trafficTilesUrl(this.mapboxToken, Math.floor(Date.now() / TRAFFIC_REFRESH))],
+        maxzoom: 16, attribution: '© Mapbox traffic',
+      });
+      const before = map.getLayer('tp-buildings-ghost') ? 'tp-buildings-ghost' : map.getLayer('tp-route-alt-casing') ? 'tp-route-alt-casing' : undefined;
+      map.addLayer({
+        id: 'tp-traffic', type: 'line', source: 'tp-traffic', 'source-layer': 'traffic', minzoom: 9,
+        // Slowdowns everywhere; free-flowing traffic only on main roads so the city doesn't turn green.
+        filter: ['any',
+          ['match', ['get', 'congestion'], ['moderate', 'heavy', 'severe'], true, false],
+          ['all', ['==', ['get', 'congestion'], 'low'], ['match', ['get', 'class'], ['motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary'], true, false]],
+        ],
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': ['match', ['get', 'congestion'], 'low', '#30d158', 'moderate', SLOW_COLORS[2], 'heavy', SLOW_COLORS[3], SLOW_COLORS[4]],
+          'line-opacity': ['match', ['get', 'congestion'], 'low', 0.7, 0.95],
+          'line-width': byZoom(0.42, 1.6),
+          // Traffic lines are directional: offset to the right-hand lane of each direction.
+          'line-offset': byZoom(0.25, 1.2),
+        },
+      }, before);
+    }
+    if (map.getLayer('tp-traffic')) map.setLayoutProperty('tp-traffic', 'visibility', this.trafficOn ? 'visible' : 'none');
+    if (this.trafficOn && !this.trafficTimer) {
+      this.trafficTimer = window.setInterval(() => {
+        const src = this.map && this.map.getSource('tp-traffic');
+        if (src && typeof src.setTiles === 'function') src.setTiles([trafficTilesUrl(this.mapboxToken, Math.floor(Date.now() / TRAFFIC_REFRESH))]);
+      }, TRAFFIC_REFRESH);
+    } else if (!this.trafficOn && this.trafficTimer) {
+      clearInterval(this.trafficTimer);
+      this.trafficTimer = 0;
+    }
   }
 
   private queueView() {
@@ -223,7 +293,12 @@ export class OsmEngine implements MapEngine {
     this.map.setStyle(buildStyle(theme, this.lang), { diff: false });
   }
 
-  async setTraffic(_visible: boolean): Promise<boolean> { return false; }
+  async setTraffic(visible: boolean): Promise<boolean> {
+    if (!this.mapboxToken) return false;
+    this.trafficOn = visible;
+    this.applyTraffic();
+    return true;
+  }
 
   setView(req: ViewRequest) {
     if (!this.map) return;
@@ -308,6 +383,16 @@ export class OsmEngine implements MapEngine {
       type: 'FeatureCollection',
       features: this.routes.filter((r) => r.coords.length > 1).map((r) => ({ type: 'Feature', properties: { role: r.role }, geometry: { type: 'LineString', coordinates: r.coords } })),
     });
+    const slow = map.getSource('tp-route-traffic');
+    if (slow) {
+      const p = colors.primary;
+      map.setPaintProperty('tp-route-traffic', 'line-width', ['interpolate', ['exponential', 2], ['zoom'], 8, p.fw * 0.6, 14, p.fw, 20, Math.max(p.fw, (p.fm * 2 ** 20) / 116860)]);
+      const primary = this.routes.find((r) => r.role === 'primary');
+      slow.setData({
+        type: 'FeatureCollection',
+        features: ((primary && primary.traffic) || []).filter((t) => t.coords.length > 1).map((t) => ({ type: 'Feature', properties: { level: t.level }, geometry: { type: 'LineString', coordinates: t.coords } })),
+      });
+    }
   }
 
   setMarkers(layer: string, specs: MarkerSpec[]) {

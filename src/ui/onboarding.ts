@@ -23,13 +23,3 @@ export function showOnboarding(error?: string) {
   document.body.appendChild(h('div.onboard', null, card));
   document.getElementById('boot')?.classList.add('done');
 }
-
-export function loadErrorMessage(e: unknown): string {
-  const m = e instanceof Error ? e.message : String(e);
-  // A refused key/domain makes the loader script fail like a network error (HTTP 403 on <script>).
-  if (m === 'network') return `Yandex refused to load the map here — add ${location.hostname} to the JS API key’s HTTP Referer list (an ad blocker can also block it).`;
-  if (m === 'timeout') return 'Yandex Maps didn’t respond in time.';
-  if (m === 'missing-key') return 'No Yandex JS API key configured.';
-  if (m === 'invalid-key' || /key|apikey|403|forbidden/i.test(m)) return `Yandex rejected the JS API key — check it and that ${location.hostname} is in its HTTP Referer list.`;
-  return `Yandex map failed: ${m}`;
-}
