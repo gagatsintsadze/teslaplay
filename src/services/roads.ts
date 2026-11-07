@@ -1,5 +1,7 @@
 import { bearing, distance, toRad } from '../core/geo';
+import { isOneway, laneModel } from '../map/roadmodel';
 import type { LngLat } from '../types';
+export { isOneway };
 
 /**
  * Lane-level road details from OpenStreetMap: lane counts, painted turn lanes (`turn:lanes`),
@@ -221,17 +223,16 @@ export class RoadDetails {
       const h = bearing(prv, nxt);
       let best: { d: number; off: number; w: number } | null = null;
       for (const w of tile.ways) {
-        if (w.t.tunnel && w.t.tunnel !== 'no') continue;
-        const lw = laneWidthM(w.t);
-        if (isOneway(w.t) !== 0) { // one-way: the route already runs down the carriageway's centre
-          const d = nearestOnWay(p, w.g, h, 10, false);
-          if (d !== null && (!best || d < best.d)) best = { d, off: 0, w: totalLanes(w.t) * lw };
-          continue;
-        }
-        const d = nearestOnWay(p, w.g, h, 10, true);
-        if (d === null || (best && d >= best.d)) continue;
-        const f = forwardLanes(w.t);
-        best = { d, off: f * lw * 0.5, w: f * lw };
+        const m = laneModel(w.t);
+        if (!m || m.tunnel) continue;
+        // Signed distance from the route vertex to the way's centre line (positive = vertex is right of it),
+        // in the direction of travel, so the band lands on the road however far the router's line is from OSM's.
+        const near = nearestOnWay(p, w.g, h, 12, !m.oneway);
+        if (!near || (best && near.d >= best.d)) continue;
+        // One-way: centre the band on the carriageway. Two-way: on the forward lanes.
+        // Two-way roads driven against the way's direction use its backward lanes.
+        const lanes = m.oneway ? m.F + m.B : near.along ? m.F : m.B;
+        best = { d: near.d, off: -near.signed + (m.oneway ? 0 : (lanes * m.lw) / 2), w: lanes * m.lw };
       }
       if (best) out[i] = { off: best.off, w: best.w };
     }
@@ -288,16 +289,6 @@ function compact(key: string, elements: any[]): RoadTile {
   return { key, ways, signals, crossings, time: Date.now() };
 }
 
-/** 1 = one-way along the geometry, -1 = against it, 0 = two-way. */
-export function isOneway(t: Record<string, string>): 1 | -1 | 0 {
-  const o = t.oneway;
-  if (o === '-1' || o === 'reverse') return -1;
-  if (o === 'yes' || o === '1' || o === 'true') return 1;
-  if (o === 'no') return 0;
-  if (t.junction === 'roundabout' || t.junction === 'circular' || /^motorway/.test(t.highway || '')) return 1;
-  return 0;
-}
-
 /** "50" / "60 mph" / "GE:urban" → km/h (null when unknown or unlimited). */
 export function parseSpeed(v: string | undefined): number | null {
   if (!v) return null;
@@ -308,43 +299,25 @@ export function parseSpeed(v: string | undefined): number | null {
   return z && zone[z[1]] ? zone[z[1]] : null;
 }
 
-/** Distance to the nearest segment of `g` running within ±60° of `heading`, or null beyond `max` m. */
-function nearestOnWay(p: LngLat, g: LngLat[], heading: number, max: number, eitherWay: boolean): number | null {
-  let best: number | null = null;
+/**
+ * Nearest segment of `g` running within ±60° of `heading` (or against it too, when `eitherWay`):
+ * distance and signed offset of `p` from it (positive = p is right of the direction of travel).
+ */
+function nearestOnWay(p: LngLat, g: LngLat[], heading: number, max: number, eitherWay: boolean): { d: number; signed: number; along: boolean } | null {
+  let best: { d: number; signed: number; along: boolean } | null = null;
   for (let i = 0; i < g.length - 1; i++) {
     const d = segDistance(p, g[i], g[i + 1]);
-    if (d > max || (best !== null && d >= best)) continue;
-    const diff = Math.abs(((heading - bearing(g[i], g[i + 1]) + 540) % 360) - 180);
-    if (diff > 60 && !(eitherWay && diff > 120)) continue;
-    best = d;
+    if (d > max || (best !== null && d >= best.d)) continue;
+    const segB = bearing(g[i], g[i + 1]);
+    const diff = Math.abs(((heading - segB + 540) % 360) - 180);
+    const along = diff <= 60, against = diff >= 120;
+    if (!along && !(eitherWay && against)) continue;
+    // Direction of travel along this segment: with its geometry when the car heads that way.
+    const travelB = along ? segB : segB + 180;
+    const side = Math.sign(Math.sin(toRad(bearing(g[i], p) - travelB)));
+    best = { d, signed: side * d, along };
   }
   return best;
-}
-
-const BASE_LANES: Record<string, [number, number]> = { motorway: [2, 2], trunk: [2, 2], primary: [1, 1], secondary: [1, 1], tertiary: [1, 1] };
-/** Forward lanes of a two-way road (tags, else class default of one per direction). */
-export function forwardLanes(t: Record<string, string>): number {
-  const f = parseInt(t['lanes:forward'] || '', 10);
-  if (f >= 1) return f;
-  const n = parseInt(t.lanes || '', 10);
-  if (n >= 1) return Math.max(1, Math.ceil(n / 2));
-  const base = BASE_LANES[(t.highway || '').replace(/_link$/, '')];
-  return base ? base[0] : 1;
-}
-/** All lanes of a one-way carriageway (tags, else class default). */
-export function totalLanes(t: Record<string, string>): number {
-  const n = parseInt(t.lanes || '', 10);
-  if (n >= 1) return n;
-  const cls = (t.highway || '').replace(/_link$/, '');
-  const link = /_link$/.test(t.highway || '');
-  return (cls === 'motorway' || cls === 'trunk') && !link && t.junction !== 'roundabout' ? 2 : 1;
-}
-/** Drawn lane width in metres — must mirror map/lanes.ts (lanes are drawn generously, 5.2–7 m, like nav maps). */
-export function laneWidthM(t: Record<string, string>): number {
-  const cls = (t.highway || '').replace(/_link$/, '');
-  const total: Record<string, number> = { motorway: 22, trunk: 20, primary: 16, secondary: 13, tertiary: 10.5 };
-  const n = parseInt(t.lanes || '', 10) || (isOneway(t) ? totalLanes(t) : 2);
-  return Math.max(5.2, Math.min(7, (total[cls] || 8) / n));
 }
 
 function segDistance(p: LngLat, a: LngLat, b: LngLat): number {

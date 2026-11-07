@@ -3,6 +3,7 @@ import type { MapClick, MapEngine, MarkerSpec, Padding, RouteLine, ViewRequest, 
 import { attachGestureWatcher } from './gestures';
 import { trafficTilesUrl } from '../services/mapbox';
 import { arrowImage, signalImage, type TurnDir } from './arrows';
+import { metres } from './roadmodel';
 import { buildStyle, PALETTES } from './style';
 
 declare global {
@@ -240,8 +241,9 @@ export class OsmEngine implements MapEngine {
     map.addSource('tp-signals', { type: 'geojson', data: empty });
     map.addSource('tp-solids', { type: 'geojson', data: empty });
     const yellow = this.theme === 'dark' ? '#e3c04a' : '#e9b949';
-    const units = (e: any): any => ['interpolate', ['exponential', 2], ['zoom'], 15, ['*', e, 2 ** 15 / 116860], 20, ['*', e, 2 ** 20 / 116860]];
-    const markW: any = ['interpolate', ['exponential', 2], ['zoom'], 16, 0.7, 18, 1.5, 20, 5];
+    // Everything here is true metres on the ground at every zoom (see roadmodel.metres).
+    const units = (e: any): any => metres(e);
+    const markW: any = metres(0.2, 1); // 20 cm painted lines, never thinner than a pixel
     const fade: any = ['interpolate', ['linear'], ['zoom'], 15.6, 0, 16.2, 1];
     for (const br of [0, 1]) {
       const before = br ? (map.getLayer('oneway') ? 'oneway' : undefined) : (map.getLayer('rail') ? 'rail' : undefined);
@@ -252,32 +254,32 @@ export class OsmEngine implements MapEngine {
       map.addLayer({ id: `tp-lane-surf${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.6, filter: f('surf'), layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: { 'line-color': ['match', ['get', 'tone'], 'major', P.asphalt, P.asphaltMinor], 'line-width': units(['get', 'w']), 'line-offset': units(['get', 'o']), 'line-opacity': fade } }, before);
       map.addLayer({ id: `tp-lane-dash${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.8, filter: f('dash'),
-        paint: { 'line-color': P.marking, 'line-width': markW, 'line-offset': units(['get', 'o']), 'line-dasharray': [9, 18], 'line-opacity': fade } }, before);
+        paint: { 'line-color': P.marking, 'line-width': markW, 'line-offset': units(['get', 'o']), 'line-dasharray': [15, 30], 'line-opacity': fade } }, before); // 3 m dash, 6 m gap
       map.addLayer({ id: `tp-lane-solid${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.8, filter: ['all', ['match', ['get', 'k'], ['solid', 'edge', 'csolid'], true, false], ['==', ['get', 'br'], br]], layout: { 'line-join': 'round' },
         paint: { 'line-color': ['match', ['get', 'k'], 'csolid', yellow, P.marking], 'line-width': markW, 'line-offset': units(['get', 'o']), 'line-opacity': ['interpolate', ['linear'], ['zoom'], 15.6, 0, 16.2, 0.9] } }, before);
       map.addLayer({ id: `tp-lane-cdash${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.8, filter: f('cdash'),
-        paint: { 'line-color': yellow, 'line-width': markW, 'line-offset': units(['get', 'o']), 'line-dasharray': [9, 9], 'line-opacity': fade } }, before);
+        paint: { 'line-color': yellow, 'line-width': markW, 'line-offset': units(['get', 'o']), 'line-dasharray': [15, 15], 'line-opacity': fade } }, before);
       map.addLayer({ id: `tp-lane-double${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.8, filter: f('double'), layout: { 'line-join': 'round' },
-        paint: { 'line-color': yellow, 'line-width': markW, 'line-gap-width': units(0.9), 'line-offset': units(['get', 'o']), 'line-opacity': fade } }, before);
+        paint: { 'line-color': yellow, 'line-width': markW, 'line-gap-width': metres(0.3), 'line-offset': units(['get', 'o']), 'line-opacity': fade } }, before);
     }
     // Stop lines (solid, 0.4 m) and zebra crossings (0.5 m stripes across the road).
     const groundBefore = map.getLayer('rail') ? 'rail' : undefined;
     map.addLayer({ id: 'tp-lane-stop', type: 'line', source: 'tp-lanes', minzoom: 16, filter: ['==', ['get', 'k'], 'stop'],
-      paint: { 'line-color': P.marking, 'line-width': units(0.8), 'line-opacity': fade } }, groundBefore);
+      paint: { 'line-color': P.marking, 'line-width': metres(0.5, 1), 'line-opacity': fade } }, groundBefore);
     map.addLayer({ id: 'tp-lane-zebra', type: 'line', source: 'tp-lanes', minzoom: 16, filter: ['==', ['get', 'k'], 'zebra'], layout: { 'line-cap': 'butt' },
-      paint: { 'line-color': P.marking, 'line-width': units(5), 'line-dasharray': [0.2, 0.2], 'line-opacity': ['interpolate', ['linear'], ['zoom'], 15.8, 0, 16.4, 0.85] } }, groundBefore);
+      paint: { 'line-color': P.marking, 'line-width': metres(3.5, 1), 'line-dasharray': [0.17, 0.17], 'line-opacity': ['interpolate', ['linear'], ['zoom'], 15.8, 0, 16.4, 0.85] } }, groundBefore); // 0.6 m stripes
     // Bridge parapets and tunnel portals: real 3D, under the buildings layer.
     map.addLayer({
       id: 'tp-solids', type: 'fill-extrusion', source: 'tp-solids', minzoom: 15,
-      paint: { 'fill-extrusion-color': ['match', ['get', 'k'], 'portal', P.buildingMid, P.bridgeKerb], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-base': 0, 'fill-extrusion-opacity': 0.95 },
+      paint: { 'fill-extrusion-color': ['match', ['get', 'k'], 'portal', P.buildingHigh, P.bridgeKerb], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-base': ['coalesce', ['get', 'base'], 0], 'fill-extrusion-opacity': 0.95 },
     }, map.getLayer('tp-buildings') ? 'tp-buildings' : undefined);
     map.addLayer({
       id: 'tp-lane-arrows', type: 'symbol', source: 'tp-lane-arrows', minzoom: 16.2,
       layout: {
         'icon-image': ['get', 'icon'], 'icon-rotate': ['get', 'rot'], 'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map',
         'icon-allow-overlap': true, 'icon-ignore-placement': true,
-        // 40 px wide image → 90 % of the lane's drawn width (twice as long as wide).
-        'icon-size': ['interpolate', ['exponential', 2], ['zoom'], 16.2, ['*', ['get', 'w'], (0.9 * 2 ** 16.2) / 116860 / 40], 20, ['*', ['get', 'w'], (0.9 * 2 ** 20) / 116860 / 40]],
+        // 40 px wide image → 90 % of the lane's width in metres, at every zoom.
+        'icon-size': metres(['*', ['get', 'w'], 0.9 / 40]),
       },
       paint: { 'icon-opacity': ['interpolate', ['linear'], ['zoom'], 16.2, 0, 16.7, 0.92] },
     }, map.getLayer('tp-buildings') ? 'tp-buildings' : undefined); // over the route line, like painted arrows seen through it
@@ -498,7 +500,7 @@ export class OsmEngine implements MapEngine {
       // Fixed pixels zoomed out; at street level as wide as the lanes the car drives in (feature `wm`, metres),
       // else the role's default metres. Casing adds 1.4 m.
       const metresExpr: any = ['+', ['coalesce', ['get', 'wm'], m], l.part === 'casing' ? 1.4 : 0];
-      map.setPaintProperty(l.id, 'line-width', ['interpolate', ['exponential', 2], ['zoom'], 8, px * 0.6, 14, px, 20, ['max', px, ['*', metresExpr, 2 ** 20 / 116860]]]);
+      map.setPaintProperty(l.id, 'line-width', metres(metresExpr, px));
     }
     const features: any[] = [];
     for (const r of this.routes) {
@@ -506,7 +508,7 @@ export class OsmEngine implements MapEngine {
       for (const p of pieces) {
         if (p.coords.length < 2) continue;
         const props: any = { role: r.role };
-        if (p.w > 0) props.wm = Math.max(4, p.w * 0.9); // the band fills the lanes, with a sliver of asphalt showing
+        if (p.w > 0) props.wm = Math.max(3, p.w - 1.2); // the band leaves 60 cm of asphalt showing each side // the band fills the lanes, with a sliver of asphalt showing
         features.push({ type: 'Feature', properties: props, geometry: { type: 'LineString', coordinates: p.coords } });
       }
     }
@@ -514,11 +516,11 @@ export class OsmEngine implements MapEngine {
     const slow = map.getSource('tp-route-traffic');
     if (slow) {
       const p = colors.primary;
-      map.setPaintProperty('tp-route-traffic', 'line-width', ['interpolate', ['exponential', 2], ['zoom'], 8, p.fw * 0.6, 14, p.fw, 20, ['max', p.fw, ['*', ['coalesce', ['get', 'wm'], p.fm], 2 ** 20 / 116860]]]);
+      map.setPaintProperty('tp-route-traffic', 'line-width', metres(['coalesce', ['get', 'wm'], p.fm], p.fw));
       const primary = this.routes.find((r) => r.role === 'primary');
       slow.setData({
         type: 'FeatureCollection',
-        features: ((primary && primary.traffic) || []).filter((t) => t.coords.length > 1).map((t) => ({ type: 'Feature', properties: { level: t.level, ...(t.w ? { wm: Math.max(4, t.w * 0.9) } : {}) }, geometry: { type: 'LineString', coordinates: t.coords } })),
+        features: ((primary && primary.traffic) || []).filter((t) => t.coords.length > 1).map((t) => ({ type: 'Feature', properties: { level: t.level, ...(t.w ? { wm: Math.max(3, t.w - 1.2) } : {}) }, geometry: { type: 'LineString', coordinates: t.coords } })),
       });
     }
   }
