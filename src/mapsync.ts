@@ -62,23 +62,23 @@ export function bindMap(app: App) {
   // Live-traffic slow stretches of a route from distance `from` on, as drawable pieces.
   const slowParts = (r: RouteResult, from = 0) => (r.traffic || [])
     .filter((t) => t.to > from + 1)
-    .map((t) => ({ coords: slice(r.coords, r.cum, Math.max(t.from, from), t.to), level: t.level }));
+    .map((t) => ({ coords: slice(app.drawCoords(r), r.cum, Math.max(t.from, from), t.to), level: t.level }));
   const renderRoutes = () => {
     const s = store.get();
     const lines: RouteLine[] = [];
     if (s.navigating && s.navRoute) {
       const r = s.navRoute;
       const p = s.nav ? s.nav.progress : 0;
-      lines.push({ id: 'nav', coords: slice(r.coords, r.cum, p, r.cum[r.cum.length - 1]), role: 'primary', traffic: slowParts(r, p) });
+      lines.push({ id: 'nav', coords: slice(app.drawCoords(r), r.cum, p, r.cum[r.cum.length - 1]), role: 'primary', traffic: slowParts(r, p) });
       drawnAt = p;
     } else if (s.panel === 'planner') {
-      s.routes.forEach((r, i) => { if (i !== s.routeIndex) lines.push({ id: r.id, coords: r.coords, role: 'alternative' }); });
+      s.routes.forEach((r, i) => { if (i !== s.routeIndex) lines.push({ id: r.id, coords: app.drawCoords(r), role: 'alternative' }); });
       const sel = s.routes[s.routeIndex];
-      if (sel) lines.push({ id: sel.id, coords: sel.coords, role: 'primary', traffic: slowParts(sel) });
+      if (sel) lines.push({ id: sel.id, coords: app.drawCoords(sel), role: 'primary', traffic: slowParts(sel) });
     }
     engine.setRoutes(lines);
   };
-  store.select((s) => [s.navigating, s.navRoute, s.panel, s.routes, s.routeIndex, s.theme], renderRoutes, { equals: eq });
+  store.select((s) => [s.navigating, s.navRoute, s.panel, s.routes, s.routeIndex, s.theme, s.roadsVersion], renderRoutes, { equals: eq });
   store.select((s) => (s.nav ? s.nav.progress : 0), (p) => {
     if (store.get().navigating && Math.abs(p - drawnAt) > 30) renderRoutes();
   });
@@ -103,7 +103,7 @@ export function bindMap(app: App) {
       const ahead = simplify(slice(r.coords, r.cum, Math.max(0, p - 30), Math.min(end, p + 900)), 4);
       const m = s.nav.maneuver;
       const near = s.nav.distToManeuver < 380 && TURNS.has(m.type);
-      const maneuver = near ? simplify(slice(r.coords, r.cum, Math.max(0, m.at - 38), Math.min(end, m.at + 28)), 0.8) : null;
+      const maneuver = near ? simplify(slice(app.drawCoords(r), r.cum, Math.max(0, m.at - 38), Math.min(end, m.at + 28)), 0.8) : null;
       engine.setNavOverlay!({ ahead, maneuver });
     });
   }

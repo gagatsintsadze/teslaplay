@@ -52,9 +52,12 @@ export function buildWay(w: RoadWay): LaneFeatures {
   let bwdTurns: TurnDir[][] | null = null;
   let F: number;
   let B: number;
+  const link = /_link$/.test(t.highway || '');
+  const roundabout = t.junction === 'roundabout' || t.junction === 'circular';
   if (oneway) {
     fwdTurns = turns(t['turn:lanes'] || t['turn:lanes:forward']);
-    F = int(t.lanes) || (fwdTurns ? fwdTurns.length : 0);
+    // Untagged: motorways/trunks run two lanes a carriageway; ramps, roundabouts and streets one.
+    F = int(t.lanes) || (fwdTurns ? fwdTurns.length : (cls === 'motorway' || cls === 'trunk') && !link && !roundabout ? 2 : 1);
     B = 0;
   } else {
     fwdTurns = turns(t['turn:lanes:forward']);
@@ -66,7 +69,7 @@ export function buildWay(w: RoadWay): LaneFeatures {
       if (f && !b) b = Math.max(0, N - f);
       else if (b && !f) f = Math.max(0, N - b);
       else if (!f && !b) { f = Math.ceil(N / 2); b = N - f; }
-    }
+    } else if (!f && !b) { f = 1; b = 1; } // untagged two-way road: one lane each way
     F = f || 0;
     B = b || 0;
   }
@@ -80,9 +83,9 @@ export function buildWay(w: RoadWay): LaneFeatures {
   const c = left + W / 2;
   const tone = MAJOR.has(cls) ? 'major' : 'minor';
 
-  if (N >= 2) {
-    out.lines.push(line(g, { k: 'surf', o: c, w: W, br, tone }));
-    const trimmed = L > 30 ? slice(g, cum, 9, L - 9) : null;
+  out.lines.push(line(g, { k: 'surf', o: c, w: W, br, tone }));
+  {
+    const trimmed = L > 30 ? slice(g, cum, 9, L - 9) : L > 12 ? slice(g, cum, 3, L - 3) : null;
     if (trimmed && trimmed.length > 1) {
       if (oneway) {
         for (let k = 1; k < F; k++) out.lines.push(line(trimmed, { k: 'dash', o: left + k * lw, br }));
@@ -94,7 +97,8 @@ export function buildWay(w: RoadWay): LaneFeatures {
         for (let k = 1; k < F; k++) out.lines.push(line(trimmed, { k: 'dash', o: k * lw, br }));
         for (let k = 1; k < B; k++) out.lines.push(line(trimmed, { k: 'dash', o: -k * lw, br }));
       }
-      if (cls !== 'minor') {
+      // Edge lines on every road but plain two-way streets (which have none in real life).
+      if (cls !== 'minor' || oneway) {
         out.lines.push(line(trimmed, { k: 'edge', o: left + 0.7, br }));
         out.lines.push(line(trimmed, { k: 'edge', o: left + W - 0.7, br }));
       }

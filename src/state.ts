@@ -57,6 +57,8 @@ export interface AppState {
   follow: FollowMode;
   azimuth: number;
   trafficAvailable: boolean;
+  /** Bumps when lane-detail tiles arrive (route lines re-align to the driving side). */
+  roadsVersion: number;
 
   home: Place | null;
   work: Place | null;
@@ -128,6 +130,7 @@ export function initialState(demo: boolean): AppState {
     follow: 'follow',
     azimuth: 0,
     trafficAvailable: true,
+    roadsVersion: 0,
     home: storage.get<Place | null>('home', null),
     work: storage.get<Place | null>('work', null),
     favorites: storage.get<Place[]>('favorites', []),

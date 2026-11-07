@@ -1,7 +1,7 @@
 import type { AppConfig } from './config';
 import { isTesla, likelyLowEnd, measureSluggish } from './core/env';
 import { setUnits } from './core/format';
-import { boundsOf, distance, padBounds, pointAt, projectOnRoute, slice } from './core/geo';
+import { boundsOf, distance, offsetLine, padBounds, pointAt, projectOnRoute, slice } from './core/geo';
 import { storage } from './core/storage';
 import { shallowEqualArray, Store } from './core/store';
 import { isDaylight, sunPosition } from './core/sun';
@@ -124,7 +124,7 @@ export class App {
       this.roadsForView(v.center, v.zoom);
     });
     if (this.roads && this.engine.setRoadDetails) {
-      this.roads.onTile(() => this.renderRoads(true));
+      this.roads.onTile(() => { this.renderRoads(true); this.store.set({ roadsVersion: this.state.roadsVersion + 1 }); });
       this.store.select((s) => [s.navRoute, s.routes, s.routeIndex], () => this.renderRoads(true), { equals: shallowEqualArray });
     }
     this.engine.onClick((e) => this.onMapTap(e));
@@ -226,6 +226,19 @@ export class App {
     const ways = tiles.flatMap((t) => t.ways);
     const signals = tiles.flatMap((t) => t.signals).concat(route && route.signals ? route.signals : []);
     this.engine.setRoadDetails(buildLanes(ways, signals));
+  }
+
+  private drawCache = new Map<string, { v: number; coords: LngLat[] }>();
+  /** Route geometry moved into the lanes of travel (right of the centre line on two-way roads). */
+  drawCoords(r: RouteResult): LngLat[] {
+    if (!this.roads) return r.coords;
+    const v = this.state.roadsVersion;
+    const hit = this.drawCache.get(r.id);
+    if (hit && hit.v === v) return hit.coords;
+    const coords = offsetLine(r.coords, this.roads.driveSideOffsets(r.coords));
+    if (this.drawCache.size > 12) this.drawCache.clear();
+    this.drawCache.set(r.id, { v, coords });
+    return coords;
   }
 
   /** Best current position: GPS fix, else the map centre, else the boot centre. */

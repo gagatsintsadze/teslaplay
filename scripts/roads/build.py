@@ -8,8 +8,8 @@ Writes out/14/<x>/<y>.json for every zoom-14 tile (~1.8 km in Georgia) that has 
 
     {"v": 1, "w": [[way_id, {tags}, [[lon, lat], ...]], ...], "s": [[lon, lat], ...]}
 
-- "w": roads (motorway … living_street, incl. links) tagged with any of lanes, lanes:forward/backward,
-       turn:lanes(:forward/:backward), maxspeed(:forward/:backward) — only the tags the app uses
+- "w": every drivable road (motorway … living_street, incl. links and roundabouts) with only the tags
+       the app draws from: lanes, turn lanes, speed limits, oneway/junction, bridge/tunnel/layer
 - "s": traffic lights (highway=traffic_signals)
 
 plus out/meta.json. The app loads these files instead of asking Overpass, so road details show
@@ -27,7 +27,7 @@ import osmium
 Z = 14
 HIGHWAYS = {'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential', 'living_street',
             'motorway_link', 'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link'}
-RELEVANT = {'lanes', 'lanes:forward', 'lanes:backward', 'turn:lanes', 'turn:lanes:forward', 'turn:lanes:backward',
+RELEVANT_UNUSED = {'lanes', 'lanes:forward', 'lanes:backward', 'turn:lanes', 'turn:lanes:forward', 'turn:lanes:backward',
             'maxspeed', 'maxspeed:forward', 'maxspeed:backward'}
 KEEP = ['highway', 'lanes', 'lanes:forward', 'lanes:backward', 'oneway', 'junction', 'turn:lanes', 'turn:lanes:forward',
         'turn:lanes:backward', 'maxspeed', 'maxspeed:forward', 'maxspeed:backward', 'divider', 'bridge', 'tunnel', 'layer']
@@ -60,8 +60,6 @@ class Collect(osmium.SimpleHandler):
 
     def way(self, w):
         if w.tags.get('highway') not in HIGHWAYS:
-            return
-        if not any(k in w.tags for k in RELEVANT):
             return
         try:
             coords = [(n.lon, n.lat) for n in w.nodes if n.location.valid()]

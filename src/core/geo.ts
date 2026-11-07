@@ -217,3 +217,21 @@ export function nearestSample(samples: { coord: LngLat; d: number }[], p: LngLat
   }
   return { sample: best, dist: bestD };
 }
+
+/** Shift a polyline sideways: positive metres to the right of travel, per vertex (miter joins). */
+export function offsetLine(coords: LngLat[], offsets: number[]): LngLat[] {
+  if (coords.length < 2 || offsets.every((o) => !o)) return coords;
+  const out: LngLat[] = [];
+  for (let i = 0; i < coords.length; i++) {
+    const o = offsets[i] || 0;
+    if (!o) { out.push(coords[i]); continue; }
+    const prv = coords[Math.max(0, i - 1)], nxt = coords[Math.min(coords.length - 1, i + 1)];
+    const b1 = i > 0 ? bearing(prv, coords[i]) : bearing(coords[i], nxt);
+    const b2 = i < coords.length - 1 ? bearing(coords[i], nxt) : b1;
+    const turn = angleDiff(b1, b2);
+    const dir = normalize360(b1 + turn / 2 + 90);
+    const miter = Math.min(1.6, 1 / Math.max(0.3, Math.cos(toRad(turn / 2))));
+    out.push(destination(coords[i], dir, o * miter));
+  }
+  return out;
+}

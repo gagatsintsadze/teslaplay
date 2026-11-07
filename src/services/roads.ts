@@ -17,7 +17,6 @@ const TTL = 30 * 864e5;
 export const ROADS_DATA_URL = 'https://raw.githubusercontent.com/gagatsintsadze/teslaplay/roads-data/';
 const ENDPOINTS = ['https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass-api.de/api/interpreter'];
 const HIGHWAYS = '^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street)(_link)?$';
-const KEYS = '^(lanes|lanes:(forward|backward)|turn:lanes(:forward|:backward)?|maxspeed(:forward|:backward)?)$';
 /** Tags kept per way (everything else Overpass returns is dropped before caching). */
 const KEEP = ['highway', 'lanes', 'lanes:forward', 'lanes:backward', 'oneway', 'junction', 'turn:lanes', 'turn:lanes:forward',
   'turn:lanes:backward', 'maxspeed', 'maxspeed:forward', 'maxspeed:backward', 'divider', 'bridge', 'tunnel', 'layer'];
@@ -177,7 +176,7 @@ export class RoadDetails {
     if (cached && Date.now() - cached.time < TTL) return cached;
     const [s, w, n, e] = tileBbox(x, y);
     const q = `[out:json][timeout:60][bbox:${s.toFixed(5)},${w.toFixed(5)},${n.toFixed(5)},${e.toFixed(5)}];`
-      + `(way[highway~"${HIGHWAYS}"][~"${KEYS}"~"."];node[highway=traffic_signals];);out geom qt;`;
+      + `(way[highway~"${HIGHWAYS}"];node[highway=traffic_signals];);out geom qt;`;
     let lastErr: unknown = null;
     for (let attempt = 0; attempt < ENDPOINTS.length; attempt++) {
       const ep = ENDPOINTS[(this.endpoint + attempt) % ENDPOINTS.length];
@@ -198,6 +197,41 @@ export class RoadDetails {
     }
     if (cached) return cached; // stale beats nothing
     throw lastErr;
+  }
+
+  /**
+   * Metres to shift each route vertex to the right so the line sits in the lanes of travel instead of
+   * on the road's centre line: half the forward carriageway on two-way roads, 0 on one-way roads and
+   * where the road is unknown. `heading` per vertex comes from the route itself.
+   */
+  driveSideOffsets(coords: LngLat[]): number[] {
+    const out = new Array(coords.length).fill(0);
+    let tile: RoadTile | undefined;
+    let key = '';
+    for (let i = 0; i < coords.length; i++) {
+      const p = coords[i];
+      const k = tileKey(...tileOf(p));
+      if (k !== key) { key = k; tile = this.tiles.get(k); }
+      if (!tile) continue;
+      const nxt = coords[Math.min(i + 1, coords.length - 1)], prv = coords[Math.max(i - 1, 0)];
+      const h = bearing(prv, nxt);
+      let best: { d: number; off: number } | null = null;
+      for (const w of tile.ways) {
+        if (isOneway(w.t) !== 0) { // one-way: route already runs down its centre
+          const d = nearestOnWay(p, w.g, h, 10, false);
+          if (d !== null && (!best || d < best.d)) best = { d, off: 0 };
+          continue;
+        }
+        const d = nearestOnWay(p, w.g, h, 10, true);
+        if (d === null || (best && d >= best.d)) continue;
+        const f = forwardLanes(w.t);
+        best = { d, off: f * laneWidthM(w.t) * 0.5 };
+      }
+      if (best) out[i] = best.off;
+    }
+    // Smooth single-vertex glitches so the line doesn't zig-zag between matched and unmatched ways.
+    for (let i = 1; i < out.length - 1; i++) if (out[i] === 0 && out[i - 1] > 0 && out[i + 1] > 0) out[i] = (out[i - 1] + out[i + 1]) / 2;
+    return out;
   }
 
   /**
@@ -263,6 +297,37 @@ export function parseSpeed(v: string | undefined): number | null {
   const zone: Record<string, number> = { urban: 60, rural: 90, motorway: 110, living_street: 20 };
   const z = /:(\w+)$/.exec(v);
   return z && zone[z[1]] ? zone[z[1]] : null;
+}
+
+/** Distance to the nearest segment of `g` running within ±60° of `heading`, or null beyond `max` m. */
+function nearestOnWay(p: LngLat, g: LngLat[], heading: number, max: number, eitherWay: boolean): number | null {
+  let best: number | null = null;
+  for (let i = 0; i < g.length - 1; i++) {
+    const d = segDistance(p, g[i], g[i + 1]);
+    if (d > max || (best !== null && d >= best)) continue;
+    const diff = Math.abs(((heading - bearing(g[i], g[i + 1]) + 540) % 360) - 180);
+    if (diff > 60 && !(eitherWay && diff > 120)) continue;
+    best = d;
+  }
+  return best;
+}
+
+const BASE_LANES: Record<string, [number, number]> = { motorway: [2, 2], trunk: [2, 2], primary: [1, 1], secondary: [1, 1], tertiary: [1, 1] };
+/** Forward lanes of a two-way road (tags, else class default of one per direction). */
+export function forwardLanes(t: Record<string, string>): number {
+  const f = parseInt(t['lanes:forward'] || '', 10);
+  if (f >= 1) return f;
+  const n = parseInt(t.lanes || '', 10);
+  if (n >= 1) return Math.max(1, Math.ceil(n / 2));
+  const base = BASE_LANES[(t.highway || '').replace(/_link$/, '')];
+  return base ? base[0] : 1;
+}
+/** Drawn lane width in metres (mirrors map/lanes.ts: 2.6–3.5 m). */
+export function laneWidthM(t: Record<string, string>): number {
+  const cls = (t.highway || '').replace(/_link$/, '');
+  const total: Record<string, number> = { motorway: 11, trunk: 10, primary: 8, secondary: 6.5, tertiary: 5.25 };
+  const n = parseInt(t.lanes || '', 10) || (isOneway(t) ? 1 : 2);
+  return Math.max(2.6, Math.min(3.5, (total[cls] || 4) / n));
 }
 
 function segDistance(p: LngLat, a: LngLat, b: LngLat): number {
