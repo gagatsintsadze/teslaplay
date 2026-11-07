@@ -89,7 +89,7 @@ src/
     search.ts        search on OpenStreetMap (Photon search-as-you-type, Overpass categories, reverse geocoding)
     routing.ts       RouteResult builder + router chain (Mapbox live traffic, then OSRM)
     mapbox.ts        Mapbox: driving-traffic routes with real maneuvers, lanes, speed limits, signals and congestion; Matrix drive times; traffic tiles
-    roads.ts         OpenStreetMap lane detail (Overpass, cached in IndexedDB): lanes, turn lanes, speed limits, traffic lights
+    roads.ts         lane detail: pre-built OSM tiles (roads-data branch), Overpass fallback, IndexedDB cache, speed-limit lookup
     osrm.ts          OpenStreetMap routing (public OSRM server), no traffic
     maneuvers.ts     builds turn instructions from route geometry for routers without them
     ev.ts            vehicle presets, energy model, charging-stop planner
@@ -104,13 +104,16 @@ src/
     glass.ts         Liquid Glass engine: per-element lens filters, sun-lit rims, touch light, frame-rate guard
     segmented.ts     segmented control with a sliding thumb
 styles/              design tokens + Liquid Glass material + component styles (light/dark)
+scripts/roads/       build.py: Geofabrik extract → road-detail tiles (run by .github/workflows/roads.yml)
 ```
 
 ### Turn-by-turn and live traffic
 With a Mapbox token, routes come from Mapbox Directions (`driving-traffic`): real maneuvers (turns, forks, roundabouts) with street names, ETAs from real-time + typical traffic, and congestion for every segment. Slow stretches are drawn over the blue route in orange/red, the route card shows the delay against a normal day, and while driving the route is re-checked every 4 minutes from the car's position: same roads → fresher ETA and colours; a different route that saves 3+ minutes → switch, with a spoken notice. Without a token, OSRM supplies routes and street names, and `services/maneuvers.ts` rebuilds the turns from the geometry.
 
 ### Lane-level roads
-`services/roads.ts` loads OpenStreetMap lane data per zoom-14 tile (~1.8 km) from Overpass — `lanes`, `lanes:forward/backward`, `turn:lanes`, `maxspeed`, `divider` and `highway=traffic_signals` — and caches it in IndexedDB for 30 days (Overpass takes 15–30 s per tile, so the area in view loads first, then the route ahead when navigation starts). `map/lanes.ts` turns it into carriageways as wide as their lanes, dashed lane lines, double/solid centre lines, edge lines, painted turn arrows 16 m and 52 m before junctions (`map/arrows.ts` draws them, and the same shapes in the banner) and upright traffic-light icons. While driving, the speed-limit sign uses Mapbox's `maxspeed` along the route, else the OSM `maxspeed` of the road you're on; it pulses red at 5+ km/h over. Mapbox lane data at each maneuver feeds the lane-guidance row under the turn banner.
+OpenStreetMap lane data — `lanes`, `lanes:forward/backward`, `turn:lanes`, `maxspeed`, `divider` and `highway=traffic_signals` — is pre-built for all of Georgia by **`.github/workflows/roads.yml`**: every Monday (or on demand: *Actions → Road details → Run workflow*) it downloads the Geofabrik extract (`europe/georgia`), runs `scripts/roads/build.py` and publishes zoom-14 tiles (~1.8 km, 4–60 KB each) to the **`roads-data`** branch. The app (`services/roads.ts`) loads them from raw.githubusercontent.com and keeps them in IndexedDB; only if that branch isn't published does it fall back to Overpass (slow, rate-limited). To cover neighbouring countries, add Geofabrik regions to `REGIONS` in the workflow (e.g. `asia/armenia asia/azerbaijan`).
+
+`map/lanes.ts` turns the tags into carriageways as wide as their lanes, dashed lane lines, double/solid centre lines, edge lines, painted turn arrows 16 m and 52 m before junctions (`map/arrows.ts` draws them, and the same shapes in the banner) and upright traffic-light icons (from zoom ~16). While driving, the speed-limit sign uses Mapbox's `maxspeed` along the route, else the OSM `maxspeed` of the road you're on; it pulses red at 5+ km/h over. Mapbox lane data at each maneuver feeds the lane-guidance row under the turn banner. Coverage follows OpenStreetMap: very good in Tbilisi and Batumi, good in Kutaisi, Rustavi and on the E60, sparser in small towns (roads without lane tags keep the default two-lane look).
 
 ### EV model
 For each section of the route: base Wh/km (vehicle preset or your override) × a speed factor (taken from that step's average speed) × a temperature factor (heating/AC), plus climbs and descents from the elevation profile (climbs cost ÷0.9, descents recover ×0.65). The planner drives as far as your arrival reserve allows, picks the most powerful charger within the last 40 km of range, charges just enough to finish (capped at your charge limit), and repeats. It then re-routes through the chosen chargers and re-checks the plan on that exact route. The vehicle figures are estimates: set your real usable kWh and consumption in Settings.
