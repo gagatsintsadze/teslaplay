@@ -2,7 +2,7 @@
 window.TESLAPLAY_CONFIG = {
   // Mapbox public token (pk.…) from https://account.mapbox.com/access-tokens/
   // Turns on live traffic: traffic-aware routes and ETAs, traffic colours on the map and the route,
-  // and drive times on nearby results. Restrict it to your site's URL in the Mapbox account.
+  // and drive times on nearby results. Use a token restricted to the site URL (Mapbox → Tokens → URL restrictions).
   // Without it the app still works: OpenStreetMap routing without traffic.
   mapboxToken: '',
   // Labels and search language: en_US, ka_GE, ru_RU, uk_UA, tr_TR

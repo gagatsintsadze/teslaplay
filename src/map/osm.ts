@@ -54,6 +54,28 @@ const TRAFFIC_UNITS: any = ['match', ['get', 'class'], ['motorway', 'motorway_li
 const byZoom = (k: number, minPx: number): any => ['interpolate', ['exponential', 2], ['zoom'],
   11, minPx, 16, ['max', minPx, ['*', TRAFFIC_UNITS, (k * 2 ** 16) / 116860]], 20, ['max', minPx, ['*', TRAFFIC_UNITS, (k * 2 ** 20) / 116860]]];
 const TRAFFIC_REFRESH = 8 * 60e3; // Mapbox updates congestion about every 8 minutes
+const TRAFFIC_SCHEME = 'tp-traffic';
+let trafficProtocol = false;
+
+/**
+ * MapLibre fetches tiles in a web worker, and those requests carry no page referrer, so Mapbox
+ * refuses them for URL-restricted tokens (403). A custom protocol makes the page itself fetch the
+ * traffic tiles (with the site's URL as referrer); MapLibre hands the bytes to the worker.
+ */
+function trafficUrl(gl: any, token: string): string {
+  const url = trafficTilesUrl(token, Math.floor(Date.now() / TRAFFIC_REFRESH));
+  if (typeof gl.addProtocol !== 'function') return url;
+  if (!trafficProtocol) {
+    gl.addProtocol(TRAFFIC_SCHEME, async (params: any, abort: AbortController) => {
+      const real = String(params.url).replace(`${TRAFFIC_SCHEME}://`, 'https://');
+      const r = await fetch(real, { signal: abort.signal, referrerPolicy: 'no-referrer-when-downgrade' });
+      if (!r.ok) throw gl.AJAXError ? new gl.AJAXError(r.status, r.statusText, real.replace(/access_token=[^&]+/, 'access_token=…'), new Blob()) : new Error(`HTTP ${r.status}`);
+      return { data: await r.arrayBuffer() };
+    });
+    trafficProtocol = true;
+  }
+  return url.replace('https://', `${TRAFFIC_SCHEME}://`);
+}
 const SLOW_COLORS: Record<number, string> = { 2: '#ff9f0a', 3: '#ff453a', 4: '#c4161c' };
 
 export class OsmEngine implements MapEngine {
@@ -200,7 +222,7 @@ export class OsmEngine implements MapEngine {
     if (!map || !map.getStyle() || !this.mapboxToken) return;
     if (this.trafficOn && !map.getSource('tp-traffic')) {
       map.addSource('tp-traffic', {
-        type: 'vector', tiles: [trafficTilesUrl(this.mapboxToken, Math.floor(Date.now() / TRAFFIC_REFRESH))],
+        type: 'vector', tiles: [trafficUrl(this.gl, this.mapboxToken)],
         maxzoom: 16, attribution: '© Mapbox traffic',
       });
       const before = map.getLayer('tp-buildings-ghost') ? 'tp-buildings-ghost' : map.getLayer('tp-route-alt-casing') ? 'tp-route-alt-casing' : undefined;
@@ -225,7 +247,7 @@ export class OsmEngine implements MapEngine {
     if (this.trafficOn && !this.trafficTimer) {
       this.trafficTimer = window.setInterval(() => {
         const src = this.map && this.map.getSource('tp-traffic');
-        if (src && typeof src.setTiles === 'function') src.setTiles([trafficTilesUrl(this.mapboxToken, Math.floor(Date.now() / TRAFFIC_REFRESH))]);
+        if (src && typeof src.setTiles === 'function') src.setTiles([trafficUrl(this.gl, this.mapboxToken)]);
       }, TRAFFIC_REFRESH);
     } else if (!this.trafficOn && this.trafficTimer) {
       clearInterval(this.trafficTimer);
