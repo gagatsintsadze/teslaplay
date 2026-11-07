@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer-when-downgrade">
+  <title>Teslaplay · Yandex key test</title>
+  <style>
+    :root { color-scheme: dark; font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { margin: 0; background: #0b0d12; color: #e8eaf0; padding: 24px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .sub { color: #9aa3b2; margin-bottom: 20px; }
+    .card { background: #161a22; border: 1px solid #262c38; border-radius: 16px; padding: 16px 18px; margin: 0 0 14px; max-width: 980px; }
+    .row { display: flex; gap: 12px; align-items: baseline; }
+    .name { font-weight: 600; min-width: 250px; }
+    .st { font-weight: 700; }
+    .ok { color: #34c759; } .bad { color: #ff453a; } .wait { color: #ffd60a; }
+    .detail { color: #b8c0cc; font-size: 14px; margin-top: 6px; white-space: pre-wrap; word-break: break-word; }
+    .map { height: 220px; border-radius: 12px; overflow: hidden; margin-top: 10px; background: #0f1218; display: none; }
+    .verdict { font-size: 18px; font-weight: 600; }
+    button { font: inherit; background: #0a84ff; color: #fff; border: 0; border-radius: 999px; padding: 10px 18px; margin-right: 8px; cursor: pointer; }
+    button.plain { background: #2a303c; }
+    code { background: #222836; padding: 1px 6px; border-radius: 6px; }
+  </style>
+  <script src="config.js"></script>
+</head>
+<body>
+  <h1>Yandex key test</h1>
+  <div class="sub">Loads Yandex the same way Teslaplay does, plus the older 2.1 map, on <b id="host"></b>.</div>
+
+  <div class="card"><div class="verdict" id="verdict">Testing…</div><div class="detail" id="advice"></div></div>
+
+  <div class="card"><div class="row"><span class="name">Key used</span><span id="key"></span></div><div class="detail" id="keyNote"></div></div>
+
+  <div class="card"><div class="row"><span class="name">JS API v3 (Teslaplay’s map)</span><span class="st wait" id="v3">…</span></div><div class="detail" id="v3d"></div><div class="map" id="v3map"></div></div>
+
+  <div class="card"><div class="row"><span class="name">JS API 2.1 (older map)</span><span class="st wait" id="v21">…</span></div><div class="detail" id="v21d"></div><div class="map" id="v21map"></div></div>
+
+  <div class="card"><div class="row"><span class="name">Router API</span><span class="st wait" id="rt">…</span></div><div class="detail" id="rtd"></div></div>
+
+  <div class="card"><div class="row"><span class="name">Geocoder API</span><span class="st wait" id="gc">…</span></div><div class="detail" id="gcd"></div></div>
+
+  <div class="card">
+    <button id="copy">Copy results</button>
+    <button class="plain" id="clear">Clear keys saved in this browser</button>
+    <a href="./" style="color:#64a8ff;margin-left:8px">Open Teslaplay</a>
+  </div>
+
+<script>
+(function () {
+  var cfg = window.TESLAPLAY_CONFIG || {};
+  var local = {};
+  try { local = JSON.parse(localStorage.getItem('tp:keys') || '{}') || {}; } catch (e) {}
+  var params = new URLSearchParams(location.search);
+  var deployed = cfg.yandexApiKey || '';
+  var key = params.get('key') || deployed;
+  var lang = cfg.mapLang || 'en_US';
+  var results = {};
+  var $ = function (id) { return document.getElementById(id); };
+  var mask = function (k) { return k ? '…' + k.slice(-6) : '(none)'; };
+  $('host').textContent = location.host || '(file)';
+
+  function set(id, ok, text, detail) {
+    var el = $(id);
+    el.className = 'st ' + (ok === true ? 'ok' : ok === false ? 'bad' : 'wait');
+    el.textContent = text;
+    if (detail !== undefined) $(id + 'd').textContent = detail;
+    results[id] = text + (detail ? ' — ' + detail : '');
+  }
+
+  $('key').textContent = 'JS API ' + mask(key) + ' · lang ' + lang;
+  var notes = [];
+  if (local.yandexApiKey && local.yandexApiKey !== deployed) notes.push('⚠️ This browser has a different JS API key saved (' + mask(local.yandexApiKey) + ') — Teslaplay was using it instead of the deployed one. Teslaplay now retries with the deployed key; “Clear keys saved in this browser” removes it.');
+  if (!deployed) notes.push('No key in config.js.');
+  $('keyNote').textContent = notes.join('\n');
+
+  function loadScript(src, timeoutMs) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      var t0 = performance.now();
+      var timer = setTimeout(function () { reject(new Error('no answer after ' + timeoutMs / 1000 + ' s')); }, timeoutMs);
+      s.src = src; s.async = true;
+      s.onload = function () { clearTimeout(timer); resolve(Math.round(performance.now() - t0)); };
+      s.onerror = function () { clearTimeout(timer); reject(new Error('Yandex refused the script (HTTP error, usually 403: key not allowed on ' + location.hostname + ')')); };
+      document.head.appendChild(s);
+    });
+  }
+
+  // Ask for the loader directly too: if Yandex allows CORS here we get its exact status and message.
+  function probe(src) {
+    return fetch(src, { credentials: 'omit' }).then(function (r) {
+      return r.text().then(function (t) { return 'HTTP ' + r.status + (r.ok ? '' : ': ' + t.slice(0, 200).replace(/\s+/g, ' ')); });
+    }, function () { return ''; });
+  }
+
+  function testV3() {
+    var src = 'https://api-maps.yandex.ru/v3/?apikey=' + encodeURIComponent(key) + '&lang=' + encodeURIComponent(lang);
+    return loadScript(src, 25000).then(function (ms) {
+      if (!window.ymaps3) throw new Error('script loaded but ymaps3 is missing (key rejected)');
+      return Promise.race([window.ymaps3.ready, new Promise(function (_, rej) { setTimeout(function () { rej(new Error('ymaps3.ready timed out')); }, 20000); })]).then(function () {
+        var y = window.ymaps3, el = $('v3map');
+        el.style.display = 'block';
+        try {
+          var map = new y.YMap(el, { location: { center: [44.7930, 41.7151], zoom: 15 }, mode: 'vector', theme: 'dark' });
+          map.addChild(new y.YMapDefaultSchemeLayer({ theme: 'dark' }));
+          map.addChild(new y.YMapDefaultFeaturesLayer({}));
+        } catch (e) { throw new Error('loaded, but creating the map failed: ' + (e && e.message || e)); }
+        set('v3', true, 'Works', 'Loaded in ' + ms + ' ms' + (y.version ? ' · v' + y.version : '') + '. If you see Tbilisi below, Teslaplay can use the Yandex map here.');
+        return true;
+      });
+    }).catch(function (e) {
+      return probe(src).then(function (p) { set('v3', false, 'Refused', (e && e.message || String(e)) + (p ? '\nYandex says: ' + p : '')); return false; });
+    });
+  }
+
+  function testV21() {
+    var src = 'https://api-maps.yandex.ru/2.1/?apikey=' + encodeURIComponent(key) + '&lang=' + encodeURIComponent(lang);
+    return loadScript(src, 25000).then(function (ms) {
+      if (!window.ymaps) throw new Error('script loaded but ymaps is missing');
+      return new Promise(function (resolve) {
+        window.ymaps.ready(function () {
+          var el = $('v21map'); el.style.display = 'block';
+          try { new window.ymaps.Map(el, { center: [41.7151, 44.7930], zoom: 14, controls: [] }); } catch (e) {}
+          set('v21', true, 'Works', 'Loaded in ' + ms + ' ms. (The 2.1 map is flat — no 3D buildings or tilt.)');
+          resolve(true);
+        });
+      });
+    }).catch(function (e) {
+      return probe(src).then(function (p) { set('v21', false, 'Refused', (e && e.message || String(e)) + (p ? '\nYandex says: ' + p : '')); return false; });
+    });
+  }
+
+  function testRouter() {
+    var k = cfg.yandexRouterKey;
+    if (!k) { set('rt', null, 'No key'); return Promise.resolve(null); }
+    var url = 'https://api.routing.yandex.net/v2/route?apikey=' + encodeURIComponent(k) + '&waypoints=41.7151,44.7930|41.7225,44.7781&mode=driving';
+    return fetch(url).then(function (r) {
+      return r.text().then(function (t) {
+        if (r.ok) { set('rt', true, 'Works', 'Key ' + mask(k) + ' · Yandex routes are used for directions.'); return true; }
+        set('rt', false, 'HTTP ' + r.status, 'Key ' + mask(k) + ': ' + t.slice(0, 200)); return false;
+      });
+    }, function (e) { set('rt', false, 'Blocked', 'Key ' + mask(k) + ': ' + (e && e.message || e) + ' (often a 403 without CORS headers: key not active or not allowed on ' + location.hostname + ')'); return false; });
+  }
+
+  function testGeocoder() {
+    var k = cfg.yandexGeocoderKey || key;
+    var url = 'https://geocode-maps.yandex.ru/v1/?apikey=' + encodeURIComponent(k) + '&geocode=44.7930,41.7151&format=json&lang=' + encodeURIComponent(lang) + '&results=1';
+    return fetch(url).then(function (r) {
+      return r.text().then(function (t) {
+        if (r.ok) {
+          var name = '';
+          try { name = JSON.parse(t).response.GeoObjectCollection.featureMember[0].GeoObject.name; } catch (e) {}
+          set('gc', true, 'Works', 'Key ' + mask(k) + (name ? ' · “' + name + '”' : '')); return true;
+        }
+        set('gc', false, 'HTTP ' + r.status, 'Key ' + mask(k) + ': ' + t.slice(0, 200)); return false;
+      });
+    }, function (e) { set('gc', false, 'Blocked', 'Key ' + mask(k) + ': ' + (e && e.message || e)); return false; });
+  }
+
+  Promise.all([testV3(), testRouter(), testGeocoder()]).then(function (r) {
+    var v3 = r[0];
+    return testV21().then(function (v21) {
+      var verdict, advice;
+      if (v3) {
+        verdict = '✅ The Yandex map works on this site.';
+        advice = 'Open Teslaplay and reload. If it still shows OpenStreetMap, send these results — then the problem is inside Teslaplay.';
+      } else if (v21) {
+        verdict = '❌ The key works for the older 2.1 map, but Yandex refuses the 3D map (JS API v3) on this site.';
+        advice = 'Yandex checks v3 keys against the key’s “HTTP Referer” list. In the Yandex Developer Dashboard → your JavaScript API key → Edit, add this line exactly (no https://, no /teslaplay):\n\n' + location.hostname + '\n\nYandex applies changes after about 15 minutes. Then reload this page.';
+      } else {
+        verdict = '❌ Yandex refuses this key on ' + location.hostname + '.';
+        advice = 'In the Yandex Developer Dashboard check that this is a “JavaScript API and HTTP Geocoder” key, that it is Active, and that its HTTP Referer list contains this line exactly (no https://, no /teslaplay):\n\n' + location.hostname + '\n\nYandex applies changes after about 15 minutes. Then reload this page.';
+      }
+      $('verdict').textContent = verdict;
+      $('advice').textContent = advice;
+      results.verdict = verdict;
+    });
+  });
+
+  $('copy').onclick = function () {
+    var text = ['Teslaplay Yandex test · ' + location.host + ' · ' + new Date().toISOString(), 'Key ' + mask(key) + (local.yandexApiKey ? ' · saved in browser ' + mask(local.yandexApiKey) : '')]
+      .concat(Object.keys(results).map(function (k) { return k + ': ' + results[k]; })).join('\n');
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () { $('copy').textContent = 'Copied'; }, function () { prompt('Copy:', text); });
+  };
+  $('clear').onclick = function () {
+    try { localStorage.removeItem('tp:keys'); } catch (e) {}
+    $('clear').textContent = 'Cleared';
+  };
+})();
+</script>
+</body>
+</html>

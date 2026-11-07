@@ -16,7 +16,7 @@ declare global {
  */
 export const AZIMUTH_SIGN = 1;
 
-const LOAD_TIMEOUT = 12000;
+const LOAD_TIMEOUT = 20000; // in-car LTE can be slow on a cold start
 let loading: Promise<any> | null = null;
 
 /** Inject the JS API v3 loader once and wait for `ymaps3.ready`. */
@@ -27,6 +27,7 @@ export function loadYandex(cfg: AppConfig): Promise<any> {
     const s = document.createElement('script');
     s.src = `https://api-maps.yandex.ru/v3/?apikey=${encodeURIComponent(cfg.yandexApiKey)}&lang=${encodeURIComponent(cfg.mapLang)}`;
     s.async = true;
+    s.referrerPolicy = 'no-referrer-when-downgrade';
     const timer = setTimeout(() => reject(new Error('timeout')), LOAD_TIMEOUT);
     s.onerror = () => { clearTimeout(timer); reject(new Error('network')); };
     s.onload = () => {
@@ -72,6 +73,8 @@ export class YandexEngine implements MapEngine {
   private clickCbs: ((e: MapClick) => void)[] = [];
   private longCbs: ((e: MapClick) => void)[] = [];
   private viewQueued = false;
+  /** Options the live API refused at start-up (shown in Settings → Map services). */
+  readonly initWarnings: string[] = [];
 
   constructor(private cfg: AppConfig) {}
 
@@ -80,17 +83,33 @@ export class YandexEngine implements MapEngine {
     this.theme = opts.theme;
     this.roadStyle = opts.roadStyle || 'drive';
     const { YMap, YMapDefaultSchemeLayer, YMapDefaultFeaturesLayer, YMapListener } = y;
-    this.map = new YMap(container, {
-      location: { center: opts.center, zoom: opts.zoom },
-      camera: { tilt: 0, azimuth: 0 },
-      mode: 'vector',
-      theme: opts.theme,
-      behaviors: ['drag', 'pinchZoom', 'scrollZoom', 'dblClick', 'mouseRotate', 'mouseTilt', 'pinchRotate', 'panTilt'],
-      zoomRange: { min: 3, max: 21 },
-      showScaleInCopyrights: true,
-    });
-    this.scheme = new YMapDefaultSchemeLayer({ theme: opts.theme, customization: this.customization() });
-    this.map.addChild(this.scheme);
+    const location = { center: opts.center, zoom: opts.zoom };
+    try {
+      this.map = new YMap(container, {
+        location,
+        camera: { tilt: 0, azimuth: 0 },
+        mode: 'vector',
+        theme: opts.theme,
+        behaviors: ['drag', 'pinchZoom', 'scrollZoom', 'dblClick', 'mouseRotate', 'mouseTilt', 'pinchRotate', 'panTilt'],
+        zoomRange: { min: 3, max: 21 },
+        showScaleInCopyrights: true,
+      });
+    } catch (e) {
+      // Never lose the Yandex map over an option this API build doesn't accept.
+      this.initWarnings.push(`map options: ${(e as Error).message || e}`);
+      console.warn('[yandex] map options rejected, using defaults', e);
+      this.map = new YMap(container, { location, mode: 'vector', theme: opts.theme });
+    }
+    try {
+      this.scheme = new YMapDefaultSchemeLayer({ theme: opts.theme, customization: this.customization() });
+      this.map.addChild(this.scheme);
+    } catch (e) {
+      this.initWarnings.push(`road style: ${(e as Error).message || e}`);
+      console.warn('[yandex] customization rejected, using the stock scheme', e);
+      this.roadStyle = 'classic';
+      this.scheme = new YMapDefaultSchemeLayer({ theme: opts.theme });
+      this.map.addChild(this.scheme);
+    }
     this.map.addChild(new YMapDefaultFeaturesLayer({}));
     this.map.addChild(new YMapListener({
       layer: 'any',

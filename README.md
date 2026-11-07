@@ -38,10 +38,12 @@ Edit **`public/config.js`** (copied to `dist/config.js`; you can change it on th
 
 On the Yandex map, **Settings → Appearance → Road style** switches between *Drive* (dark asphalt roads with white lane markings at street zoom, wider roads, muted land) and Yandex's stock scheme.
 
+**`yandex-test.html`** (Settings → Map services → *Yandex key test*) loads the JS API v3 and the older 2.1 map side by side with the deployed keys, plus the Router and Geocoder, and says in one line why the Yandex map isn't loading (key refused on this domain, or a stale key saved in the browser). Teslaplay itself retries with the deployed key when a key saved in the browser is refused.
+
 **Settings → Map services → Check services** tests every service with the keys in that browser (Yandex map, Geosuggest, Places, routing, Geocoder, traffic; OSRM, Photon, Overpass, Open Charge Map, weather, GPS). It shows what the app is using for search, places, directions and chargers, and *Copy report* puts the results on the clipboard.
 
 ### ⚠️ JS API v3 keys need an HTTP Referer restriction
-Yandex only activates a v3 key once its **HTTP Referer restriction** field is filled in. In the Developer Dashboard, open the key's settings and add every host you'll use, for example:
+Yandex checks v3 keys against the key's **HTTP Referer** list. In the Developer Dashboard, open the key's settings and add every host you'll use: bare domains, one per line, with no `https://`, port or path (subdomains are included automatically), for example:
 
 ```
 gagatsintsadze.github.io

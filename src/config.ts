@@ -53,6 +53,18 @@ export function loadConfig(): AppConfig {
   return cfg;
 }
 
+/** The JS API key deployed in config.js (ignores keys saved in this browser). */
+export function deployedApiKey(): string {
+  return ((window.TESLAPLAY_CONFIG || {}) as Partial<AppConfig>).yandexApiKey || '';
+}
+
+/** Forget a JS API key saved in this browser (e.g. one typed into an old version's key screen). */
+export function clearLocalApiKey() {
+  const keys = storage.get<LocalKeys>('keys', {});
+  delete keys.yandexApiKey;
+  storage.set('keys', keys);
+}
+
 export function saveLocalKeys(keys: LocalKeys) {
   storage.set('keys', { ...storage.get<LocalKeys>('keys', {}), ...keys });
 }

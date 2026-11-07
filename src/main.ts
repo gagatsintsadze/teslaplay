@@ -1,5 +1,5 @@
 import { App } from './app';
-import { loadConfig } from './config';
+import { clearLocalApiKey, deployedApiKey, loadConfig } from './config';
 import { isTesla } from './core/env';
 import { watchForUpdates } from './core/update';
 import { bindMap } from './mapsync';
@@ -50,13 +50,32 @@ async function main() {
   } catch (e) {
     console.error(e);
     if (app.engine.kind === 'demo' || app.engine.kind === 'osm') { showOnboarding(String((e as Error).message || e)); return; }
+    // A key saved in this browser (e.g. typed into an old key screen) overrides config.js.
+    // If it's refused, forget it and try the deployed key before leaving Yandex.
+    const deployed = deployedApiKey();
+    if (deployed && cfg.yandexApiKey !== deployed && !new URLSearchParams(location.search).get('key')) {
+      console.warn('[map] saved key …' + cfg.yandexApiKey.slice(-4) + ' refused; retrying with the deployed key');
+      clearLocalApiKey();
+      cfg.yandexApiKey = deployed;
+      try {
+        await app.start(mapEl);
+        app.toast('Yandex map loaded with the site’s key — an old key saved in this browser was removed.', 'info', 6500);
+        bindMap(app);
+        relight();
+        requestAnimationFrame(() => document.getElementById('boot')!.classList.add('done'));
+        return;
+      } catch (e3) {
+        console.error(e3);
+        e = e3;
+      }
+    }
     // Yandex map didn't load (key not allowed on this site, blocked, timeout): carry on with
     // the OpenStreetMap map. Search, Yandex routing, drive times and chargers keep working.
     const reason = loadErrorMessage(e);
     app.useOsmMap(reason);
     try {
       await app.start(mapEl);
-      app.toast('Yandex map didn’t load — showing OpenStreetMap. Details in Settings → Map services.', 'info', 6500);
+      app.toast(`Yandex map didn’t load (${shortReason(e)}) — showing OpenStreetMap. Settings → Map services → Yandex key test.`, 'info', 9000);
     } catch (e2) {
       console.error(e2);
       console.warn('[map] Yandex:', reason);
@@ -67,6 +86,14 @@ async function main() {
   bindMap(app);
   relight();
   requestAnimationFrame(() => document.getElementById('boot')!.classList.add('done'));
+}
+
+function shortReason(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e);
+  if (m === 'network') return 'Yandex refused the key on this site';
+  if (m === 'timeout') return 'no answer from Yandex';
+  if (m === 'invalid-key') return 'key rejected';
+  return m.length > 60 ? m.slice(0, 57) + '…' : m;
 }
 
 main();

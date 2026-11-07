@@ -54,7 +54,8 @@ export async function runServiceCheck(app: App): Promise<CheckResult[]> {
 
   add('map', 'Yandex map', live ? async () => {
     if (!y) throw new Error('JS API not loaded');
-    return `JS API v3 loaded${y.version ? ` (${y.version})` : ''} · key …${cfg.yandexApiKey.slice(-4)}`;
+    const warn = (app.engine as any).initWarnings as string[] | undefined;
+    return `JS API v3 loaded${y.version ? ` (${y.version})` : ''} · key …${cfg.yandexApiKey.slice(-4)}${warn && warn.length ? ` · refused: ${warn.join('; ')}` : ''}`;
   } : app.engine.kind === 'osm' ? async () => { throw new Error(app.mapFallbackReason || 'Not loaded'); } : null, 'Demo mode — offline map');
   if (app.engine.kind === 'osm') add('osmmap', 'OpenStreetMap map', async () => 'Showing CARTO / OpenStreetMap tiles');
 

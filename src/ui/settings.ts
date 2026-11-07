@@ -75,6 +75,7 @@ export function mountSettings(app: App, hud: HTMLElement) {
     }
     rows.push(h('div.set-row', null,
       h('div.label', null, checks ? 'Run again after changing keys' : 'Check what works with these keys', h('small', null, 'Tests the map, search, directions, chargers and GPS from this browser')),
+      h('button.btn.btn-plain.pressable', { onclick: () => window.open('yandex-test.html', '_blank'), style: { minHeight: '2.75rem' } }, 'Yandex key test'),
       checks ? h('button.btn.btn-plain.pressable', { onclick: copyReport, style: { minHeight: '2.75rem' } }, 'Copy report') : null,
       h('button.btn.btn-tinted.pressable', { onclick: runCheck, disabled: checking, style: { minHeight: '2.75rem' } }, checking ? h('span.spinner', { style: { width: '1.1rem', height: '1.1rem', borderWidth: '2px' } }) : null, checking ? 'Checking…' : checks ? 'Check again' : 'Check services'),
     ));
