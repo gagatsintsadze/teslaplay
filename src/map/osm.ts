@@ -315,7 +315,8 @@ export class OsmEngine implements MapEngine {
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: {
           'line-color': ['match', ['get', 'congestion'], 'low', '#30d158', 'moderate', SLOW_COLORS[2], 'heavy', SLOW_COLORS[3], SLOW_COLORS[4]],
-          'line-opacity': ['match', ['get', 'congestion'], 'low', 0.7, 0.95],
+          // At street level free-flowing traffic turns into a light tint so lane markings show through.
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 16, ['match', ['get', 'congestion'], 'low', 0.7, 0.95], 17.5, ['match', ['get', 'congestion'], 'low', 0.32, 0.75]],
           'line-width': byZoom(0.42, 1.6),
           // Traffic lines are directional: offset to the right-hand lane of each direction.
           'line-offset': byZoom(0.25, 1.2),
