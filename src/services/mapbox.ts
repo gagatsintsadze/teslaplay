@@ -132,10 +132,12 @@ export class MapboxMatrix {
     for (let i = 0; i < dests.length; i += 9) {
       const chunk = dests.slice(i, i + 9);
       const coords = [origin, ...chunk].map((p) => `${p[0].toFixed(6)},${p[1].toFixed(6)}`).join(';');
+      // The Matrix API needs at least 2 elements: with one destination, also ask origin → origin.
+      const pad = chunk.length === 1 ? 1 : 0;
       const qs = new URLSearchParams({
         access_token: this.token,
         sources: '0',
-        destinations: chunk.map((_, k) => String(k + 1)).join(';'),
+        destinations: (pad ? ['0'] : []).concat(chunk.map((_, k) => String(k + 1))).join(';'),
         annotations: 'duration,distance',
       });
       let j: any;
@@ -148,8 +150,9 @@ export class MapboxMatrix {
       const dur: (number | null)[] = (j.durations && j.durations[0]) || [];
       const dist: (number | null)[] = (j.distances && j.distances[0]) || [];
       chunk.forEach((_, k) => {
-        const d = dur[k];
-        out.push(typeof d === 'number' ? { duration: d, distance: typeof dist[k] === 'number' ? (dist[k] as number) : 0 } : null);
+        const d = dur[k + pad];
+        const m = dist[k + pad];
+        out.push(typeof d === 'number' ? { duration: d, distance: typeof m === 'number' ? m : 0 } : null);
       });
     }
     return out;
