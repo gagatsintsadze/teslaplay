@@ -1,7 +1,7 @@
 import type { AppConfig } from './config';
 import { isTesla, likelyLowEnd, measureSluggish } from './core/env';
 import { setUnits } from './core/format';
-import { boundsOf, distance, offsetLine, padBounds, pointAt, projectOnRoute, slice } from './core/geo';
+import { boundsOf, distance, padBounds, pointAt, projectOnRoute, slice } from './core/geo';
 import { storage } from './core/storage';
 import { shallowEqualArray, Store } from './core/store';
 import { isDaylight, sunPosition } from './core/sun';
@@ -22,7 +22,7 @@ import { OsmPlaces } from './services/osm';
 import { OsrmRouting } from './services/osrm';
 import { OsmSearch, type SearchService } from './services/search';
 import { RoadDetails } from './services/roads';
-import { buildLanes } from './map/lanes';
+import { placeOnLanes } from './nav/laneroute';
 import { Voice } from './services/voice';
 import { WeatherService } from './services/weather';
 import { type AppState, initialState } from './state';
@@ -125,7 +125,6 @@ export class App {
     });
     if (this.roads && this.engine.setRoadDetails) {
       this.roads.onTile(() => { this.renderRoads(true); this.store.set({ roadsVersion: this.state.roadsVersion + 1 }); });
-      this.store.select((s) => [s.navRoute, s.routes, s.routeIndex], () => this.renderRoads(true), { equals: shallowEqualArray });
       // The puck glides along the drawn (lane-aligned) line, not the road's centre line.
       this.store.select((s) => [s.navRoute, s.roadsVersion], () => { if (this.state.navRoute) this.follow.setDisplayCoords(this.drawCoords(this.state.navRoute)); }, { equals: shallowEqualArray });
     }
@@ -214,31 +213,26 @@ export class App {
     }, 600);
   }
 
-  /** Draw the loaded tiles around the view (+ traffic lights on the active route). */
+  /** Draw the loaded tiles around the view. */
   private renderRoads(force: boolean) {
     const roads = this.roads;
     if (!roads || !this.engine.setRoadDetails || !this.roadsCenter) return;
     const keys = roads.around(this.roadsCenter).map(([x, y]) => `14/${x}/${y}`).filter((k) => roads.tiles.has(k));
-    const s = this.state;
-    const route = s.navigating ? s.navRoute : s.routes[s.routeIndex];
-    const sig = `${keys.join(' ')}|${route ? route.id : ''}`;
+    const sig = keys.join(' ');
     if (!force && sig === this.roadsKey) return;
     this.roadsKey = sig;
-    const tiles = keys.map((k) => roads.tiles.get(k)!);
-    const ways = tiles.flatMap((t) => t.ways);
-    const signals = tiles.flatMap((t) => t.signals).concat(route && route.signals ? route.signals : []);
-    this.engine.setRoadDetails(buildLanes(ways, signals, tiles.flatMap((t) => t.crossings || [])));
+    this.engine.setRoadDetails(roads.scene(keys));
   }
 
   private drawCache = new Map<string, { v: number; coords: LngLat[]; widths: number[] }>();
-  /** Route geometry moved into the lanes of travel (right of the centre line on two-way roads), plus the lane-band width per vertex. */
+  /** Route geometry on its lanes (nav/laneroute.ts), plus the lane-band width per vertex (0 = no lane data). */
   drawGeometry(r: RouteResult): { coords: LngLat[]; widths: number[] } {
     if (!this.roads) return { coords: r.coords, widths: [] };
     const v = this.state.roadsVersion;
     const hit = this.drawCache.get(r.id);
     if (hit && hit.v === v) return hit;
-    const bands = this.roads.driveBands(r.coords);
-    const entry = { v, coords: offsetLine(r.coords, bands.map((b) => b.off)), widths: bands.map((b) => b.w) };
+    const placed = placeOnLanes(r.coords, r.cum, r.maneuvers, this.roads);
+    const entry = { v, ...placed };
     if (this.drawCache.size > 12) this.drawCache.clear();
     this.drawCache.set(r.id, entry);
     return entry;

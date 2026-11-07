@@ -39,9 +39,12 @@ export const PALETTES: Record<'light' | 'dark', Palette> = {
   },
 };
 
-/** Typical carriageway width per OSM class, metres. */
-/** Carriageway width per OSM class, metres — a little generous, as nav maps draw them, for legibility. */
-const ROAD_W: Record<string, number> = { motorway: 22, trunk: 20, primary: 16, secondary: 13, tertiary: 10.5, minor: 8, service: 5, track: 3.5 };
+/**
+ * Carriageway width per OSM class, metres, at street zooms. The lane model (map/roadlayers.ts) draws the
+ * exact asphalt on top of these at z15.3+, so they only need to be a plausible underlay (and the look
+ * where no lane data exists). Motorways/trunks are mapped per carriageway in OSM.
+ */
+const ROAD_W: Record<string, number> = { motorway: 12, trunk: 11, primary: 10, secondary: 9, tertiary: 8, minor: 6.5, service: 4, track: 3 };
 const RANK: Record<string, number> = { service: 1, track: 1, minor: 2, tertiary: 3, secondary: 4, primary: 5, trunk: 6, motorway: 7 };
 const ROAD_CLASSES = Object.keys(ROAD_W);
 
@@ -82,7 +85,6 @@ export function buildStyle(theme: 'light' | 'dark', lang: string): any {
     15, ['match', ['get', 'class'], ['motorway', 'trunk'], P.motorwayLow, ['service', 'track'], P.roadLow, P.roadLow],
     16.5, ['match', ['get', 'class'], ['motorway', 'trunk', 'primary', 'secondary'], P.asphalt, ['service', 'track'], P.service, P.asphaltMinor]];
   const kerbColor: any = ['interpolate', ['linear'], ['zoom'], 15, P.kerb, 16.5, P.kerb];
-  const twoWay: any = ['!=', ['coalesce', ['get', 'oneway'], 0], 1];
   const font = (w: 'Regular' | 'Bold' | 'Italic') => [`Noto Sans ${w}`];
 
   const roadLayers = (prefix: string, filter: any[], opts: { kerb: string; opacity?: number; dash?: boolean } ) => [
@@ -97,19 +99,6 @@ export function buildStyle(theme: 'light' | 'dark', lang: string): any {
       filter: roadFilter(filter),
       layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': byClass(RANK, 0) },
       paint: { 'line-color': prefix === 'tunnel' ? P.tunnel : roadColor, 'line-width': metres(W), 'line-opacity': opts.opacity ?? 1 },
-    },
-    {
-      // White edge lines: a hairline drawn either side of the carriageway via line-gap-width.
-      id: `${prefix}-edges`, type: 'line', source: SRC, 'source-layer': 'transportation', minzoom: 16.2,
-      filter: roadFilter([...filter, ['match', ['get', 'class'], ['motorway', 'trunk', 'primary', 'secondary', 'tertiary'], true, false]]),
-      layout: { 'line-join': 'round' },
-      paint: { 'line-color': P.marking, 'line-opacity': ['interpolate', ['linear'], ['zoom'], 16.2, 0, 17, 0.85], 'line-width': fixedM(0.16, 1), 'line-gap-width': metres(W, -1.6) },
-    },
-    {
-      id: `${prefix}-centre`, type: 'line', source: SRC, 'source-layer': 'transportation', minzoom: 16.2,
-      filter: roadFilter([...filter, twoWay, ['match', ['get', 'class'], ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor'], true, false]]),
-      layout: { 'line-join': 'round' },
-      paint: { 'line-color': P.marking, 'line-opacity': ['interpolate', ['linear'], ['zoom'], 16.2, 0, 17, 0.9], 'line-width': fixedM(0.16, 1), 'line-dasharray': [6, 6] },
     },
   ];
 

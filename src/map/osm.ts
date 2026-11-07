@@ -2,8 +2,9 @@ import type { LngLat, LngLatBounds } from '../types';
 import type { MapClick, MapEngine, MarkerSpec, Padding, RouteLine, ViewRequest, ViewState } from './engine';
 import { attachGestureWatcher } from './gestures';
 import { trafficTilesUrl } from '../services/mapbox';
-import { arrowImage, signalImage, type TurnDir } from './arrows';
-import { metres } from './roadmodel';
+import { arrowImage, turnSet } from './arrows';
+import { addRoadLayers, metres, setRoadScene } from './roadlayers';
+import type { RoadScene } from '../services/roads';
 import { buildStyle, PALETTES } from './style';
 
 declare global {
@@ -99,7 +100,7 @@ export class OsmEngine implements MapEngine {
   private maneuver: LngLat[] | null = null;
 
   private trafficOn = false;
-  private details: { lines: any; arrows: any; signals: any; solids?: any } | null = null;
+  private scene: RoadScene | null = null;
   private trafficTimer = 0;
   /** Called when Mapbox refuses the traffic tiles (bad or restricted token). */
   onTrafficError: ((message: string) => void) | null = null;
@@ -141,7 +142,7 @@ export class OsmEngine implements MapEngine {
     map.on('styleimagemissing', (e: any) => {
       const id: string = e && e.id;
       if (!id || !id.startsWith('ta:') || map.hasImage(id)) return;
-      const img = arrowImage(id.slice(3).split(';') as TurnDir[], PALETTES[this.theme].marking);
+      const img = arrowImage(turnSet(id.slice(3).split(';')), PALETTES[this.theme].marking);
       if (img) map.addImage(id, img, { pixelRatio: 2 });
     });
     map.on('move', () => this.queueView());
@@ -220,97 +221,17 @@ export class OsmEngine implements MapEngine {
       map.addLayer({ id: 'tp-mv-head-casing', type: 'line', source: 'tp-mv', filter: ['==', ['geometry-type'], 'Polygon'], layout: { 'line-join': 'round' }, paint: { 'line-color': '#0b4fc4', 'line-width': w(1, 2.5) } });
       map.addLayer({ id: 'tp-mv-head', type: 'fill', source: 'tp-mv', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#ffffff' } });
     }
-    this.addRoadDetailLayers();
+    addRoadLayers(map, this.theme);
+    if (this.scene) setRoadScene(map, this.scene);
     this.applyTraffic();
     this.paintRoutes();
     this.applyNavOverlay();
   }
 
-  /**
-   * Lane-level detail from OpenStreetMap (see map/lanes.ts): lane-width carriageways, lane lines,
-   * painted turn arrows and traffic lights. Drawn just above the style's own roads — ground-level
-   * roads before the rail/bridge layers, bridges after them — so bridges still cross on top.
-   */
-  private addRoadDetailLayers() {
-    const map = this.map;
-    if (map.getSource('tp-lanes')) { this.applyRoadDetails(); return; }
-    const P = PALETTES[this.theme];
-    const empty = { type: 'FeatureCollection', features: [] };
-    map.addSource('tp-lanes', { type: 'geojson', data: empty, tolerance: 0.2 });
-    map.addSource('tp-lane-arrows', { type: 'geojson', data: empty });
-    map.addSource('tp-signals', { type: 'geojson', data: empty });
-    map.addSource('tp-solids', { type: 'geojson', data: empty });
-    const yellow = this.theme === 'dark' ? '#e3c04a' : '#e9b949';
-    // Everything here is true metres on the ground at every zoom (see roadmodel.metres).
-    const units = (e: any): any => metres(e);
-    const markW: any = metres(0.2, 1); // 20 cm painted lines, never thinner than a pixel
-    const fade: any = ['interpolate', ['linear'], ['zoom'], 15.6, 0, 16.2, 1];
-    for (const br of [0, 1]) {
-      const before = br ? (map.getLayer('oneway') ? 'oneway' : undefined) : (map.getLayer('rail') ? 'rail' : undefined);
-      const sfx = br ? '-br' : '';
-      const f = (k: string): any => ['all', ['==', ['get', 'k'], k], ['==', ['get', 'br'], br]];
-      map.addLayer({ id: `tp-lane-kerb${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.6, filter: f('surf'), layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': br ? P.bridgeKerb : P.kerb, 'line-width': units(['+', ['get', 'w'], 3.5]), 'line-offset': units(['get', 'o']), 'line-opacity': fade } }, before);
-      map.addLayer({ id: `tp-lane-surf${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.6, filter: f('surf'), layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': ['match', ['get', 'tone'], 'major', P.asphalt, P.asphaltMinor], 'line-width': units(['get', 'w']), 'line-offset': units(['get', 'o']), 'line-opacity': fade } }, before);
-      map.addLayer({ id: `tp-lane-dash${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.8, filter: f('dash'),
-        paint: { 'line-color': P.marking, 'line-width': markW, 'line-offset': units(['get', 'o']), 'line-dasharray': [15, 30], 'line-opacity': fade } }, before); // 3 m dash, 6 m gap
-      map.addLayer({ id: `tp-lane-solid${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.8, filter: ['all', ['match', ['get', 'k'], ['solid', 'edge', 'csolid'], true, false], ['==', ['get', 'br'], br]], layout: { 'line-join': 'round' },
-        paint: { 'line-color': ['match', ['get', 'k'], 'csolid', yellow, P.marking], 'line-width': markW, 'line-offset': units(['get', 'o']), 'line-opacity': ['interpolate', ['linear'], ['zoom'], 15.6, 0, 16.2, 0.9] } }, before);
-      map.addLayer({ id: `tp-lane-cdash${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.8, filter: f('cdash'),
-        paint: { 'line-color': yellow, 'line-width': markW, 'line-offset': units(['get', 'o']), 'line-dasharray': [15, 15], 'line-opacity': fade } }, before);
-      map.addLayer({ id: `tp-lane-double${sfx}`, type: 'line', source: 'tp-lanes', minzoom: 15.8, filter: f('double'), layout: { 'line-join': 'round' },
-        paint: { 'line-color': yellow, 'line-width': markW, 'line-gap-width': metres(0.3), 'line-offset': units(['get', 'o']), 'line-opacity': fade } }, before);
-    }
-    // Stop lines (solid, 0.4 m) and zebra crossings (0.5 m stripes across the road).
-    const groundBefore = map.getLayer('rail') ? 'rail' : undefined;
-    map.addLayer({ id: 'tp-lane-stop', type: 'line', source: 'tp-lanes', minzoom: 16, filter: ['==', ['get', 'k'], 'stop'],
-      paint: { 'line-color': P.marking, 'line-width': metres(0.5, 1), 'line-opacity': fade } }, groundBefore);
-    map.addLayer({ id: 'tp-lane-zebra', type: 'line', source: 'tp-lanes', minzoom: 16, filter: ['==', ['get', 'k'], 'zebra'], layout: { 'line-cap': 'butt' },
-      paint: { 'line-color': P.marking, 'line-width': metres(3.5, 1), 'line-dasharray': [0.17, 0.17], 'line-opacity': ['interpolate', ['linear'], ['zoom'], 15.8, 0, 16.4, 0.85] } }, groundBefore); // 0.6 m stripes
-    // Bridge parapets and tunnel portals: real 3D, under the buildings layer.
-    map.addLayer({
-      id: 'tp-solids', type: 'fill-extrusion', source: 'tp-solids', minzoom: 15,
-      paint: { 'fill-extrusion-color': ['match', ['get', 'k'], 'portal', P.buildingHigh, P.bridgeKerb], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-base': ['coalesce', ['get', 'base'], 0], 'fill-extrusion-opacity': 0.95 },
-    }, map.getLayer('tp-buildings') ? 'tp-buildings' : undefined);
-    map.addLayer({
-      id: 'tp-lane-arrows', type: 'symbol', source: 'tp-lane-arrows', minzoom: 16.2,
-      layout: {
-        'icon-image': ['get', 'icon'], 'icon-rotate': ['get', 'rot'], 'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map',
-        'icon-allow-overlap': true, 'icon-ignore-placement': true,
-        // 40 px wide image → 90 % of the lane's width in metres, at every zoom.
-        'icon-size': metres(['*', ['get', 'w'], 0.9 / 40]),
-      },
-      paint: { 'icon-opacity': ['interpolate', ['linear'], ['zoom'], 16.2, 0, 16.7, 0.92] },
-    }, map.getLayer('tp-buildings') ? 'tp-buildings' : undefined); // over the route line, like painted arrows seen through it
-    const sig = signalImage();
-    if (sig && !map.hasImage('tp-signal')) map.addImage('tp-signal', sig, { pixelRatio: 2 });
-    map.addLayer({
-      id: 'tp-signals', type: 'symbol', source: 'tp-signals', minzoom: 15.5,
-      layout: {
-        'icon-image': 'tp-signal', 'icon-anchor': 'bottom', 'icon-allow-overlap': true, 'icon-ignore-placement': true,
-        'icon-pitch-alignment': 'viewport', 'icon-rotation-alignment': 'viewport',
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 15.5, 0.45, 17, 0.75, 19, 1.15],
-      },
-      paint: { 'icon-opacity': ['interpolate', ['linear'], ['zoom'], 15.5, 0, 16, 1] },
-    }, map.getLayer('poi-dot') ? 'poi-dot' : undefined);
-    this.applyRoadDetails();
-  }
-
-  /** Lane lines, painted arrows and traffic lights from OpenStreetMap (see map/lanes.ts). */
-  setRoadDetails(d: { lines: any; arrows: any; signals: any; solids?: any }) {
-    this.details = d;
-    this.applyRoadDetails();
-  }
-
-  private applyRoadDetails() {
-    const map = this.map;
-    if (!map || !this.details) return;
-    const set = (id: string, data: any) => { const s = map.getSource(id); if (s) s.setData(data); };
-    set('tp-lanes', this.details.lines);
-    set('tp-lane-arrows', this.details.arrows);
-    set('tp-signals', this.details.signals);
-    if (this.details.solids) set('tp-solids', this.details.solids);
+  /** The lane model (services/roads.ts): asphalt, junctions, markings, arrows, parapets, portals, traffic lights. */
+  setRoadDetails(scene: RoadScene) {
+    this.scene = scene;
+    if (this.map && this.map.getSource('tp-surf')) setRoadScene(this.map, scene);
   }
 
   /** Mapbox Traffic v1: congestion lines on each side of the road, beneath the route and buildings. */
@@ -499,7 +420,7 @@ export class OsmEngine implements MapEngine {
       // Fixed pixels when zoomed out; at street level it covers the lane like a painted road.
       // Fixed pixels zoomed out; at street level as wide as the lanes the car drives in (feature `wm`, metres),
       // else the role's default metres. Casing adds 1.4 m.
-      const metresExpr: any = ['+', ['coalesce', ['get', 'wm'], m], l.part === 'casing' ? 1.4 : 0];
+      const metresExpr: any = ['+', ['coalesce', ['get', 'wm'], m], l.part === 'casing' ? 0.8 : 0];
       map.setPaintProperty(l.id, 'line-width', metres(metresExpr, px));
     }
     const features: any[] = [];
@@ -508,7 +429,7 @@ export class OsmEngine implements MapEngine {
       for (const p of pieces) {
         if (p.coords.length < 2) continue;
         const props: any = { role: r.role };
-        if (p.w > 0) props.wm = Math.max(3, p.w - 1.2); // the band leaves 60 cm of asphalt showing each side // the band fills the lanes, with a sliver of asphalt showing
+        if (p.w > 0) props.wm = Math.max(2.4, p.w - 0.5); // the band fills the lanes, 25 cm of asphalt showing each side
         features.push({ type: 'Feature', properties: props, geometry: { type: 'LineString', coordinates: p.coords } });
       }
     }
@@ -520,7 +441,7 @@ export class OsmEngine implements MapEngine {
       const primary = this.routes.find((r) => r.role === 'primary');
       slow.setData({
         type: 'FeatureCollection',
-        features: ((primary && primary.traffic) || []).filter((t) => t.coords.length > 1).map((t) => ({ type: 'Feature', properties: { level: t.level, ...(t.w ? { wm: Math.max(3, t.w - 1.2) } : {}) }, geometry: { type: 'LineString', coordinates: t.coords } })),
+        features: ((primary && primary.traffic) || []).filter((t) => t.coords.length > 1).map((t) => ({ type: 'Feature', properties: { level: t.level, ...(t.w ? { wm: Math.max(2.4, t.w - 0.5) } : {}) }, geometry: { type: 'LineString', coordinates: t.coords } })),
       });
     }
   }

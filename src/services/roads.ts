@@ -1,30 +1,61 @@
-import { bearing, distance, toRad } from '../core/geo';
-import { isOneway, laneModel } from '../map/roadmodel';
+import { bearing, toRad } from '../core/geo';
 import type { LngLat } from '../types';
-export { isOneway };
 
 /**
- * Lane-level road details from OpenStreetMap: lane counts, painted turn lanes (`turn:lanes`),
- * speed limits (`maxspeed`) and traffic lights, one zoom-14 tile (~1.8 km square in Georgia) at a time.
+ * The lane model: pre-built, country-wide road detail from OpenStreetMap, one zoom-14 tile
+ * (~1.8 km square in Georgia) at a time. Everything is computed offline by scripts/roads/lanes.py
+ * — lane layouts, asphalt polygons, junction polygons, white markings, painted arrows, bridge
+ * parapets and tunnel portals — in real metres, so the app only draws what it is given and
+ * never offsets lines at run time (see docs in lanes.py for the tile format).
  *
- * Source, in order:
- *  1. Pre-built tiles for the whole country (`roads-data` branch, built weekly from the Geofabrik
- *     extract by .github/workflows/roads.yml) — a few KB each, instant, no rate limits
- *  2. Overpass, only when those aren't published yet (slow and rate-limited: 15–30 s per tile, 429s)
- * Tiles are kept in IndexedDB, so a known area shows instantly even offline.
+ * Tiles are published on the `roads-data` branch by .github/workflows/roads.yml and kept in
+ * IndexedDB, so a known area shows instantly, even offline.
  */
 
 export const DETAIL_Z = 14;
-const TTL = 30 * 864e5;
 export const ROADS_DATA_URL = 'https://raw.githubusercontent.com/gagatsintsadze/teslaplay/roads-data/';
-const ENDPOINTS = ['https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass-api.de/api/interpreter'];
-const HIGHWAYS = '^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street)(_link)?$';
-/** Tags kept per way (everything else Overpass returns is dropped before caching). */
-const KEEP = ['highway', 'lanes', 'lanes:forward', 'lanes:backward', 'oneway', 'junction', 'turn:lanes', 'turn:lanes:forward',
-  'turn:lanes:backward', 'maxspeed', 'maxspeed:forward', 'maxspeed:backward', 'divider', 'bridge', 'tunnel', 'layer'];
+const FORMAT = 3;
 
-export interface RoadWay { id: number; g: LngLat[]; t: Record<string, string> }
-export interface RoadTile { key: string; ways: RoadWay[]; signals: LngLat[]; crossings?: LngLat[]; time: number; /** Build stamp of the pre-built dataset it came from. */ built?: string }
+/** One drivable stretch of road between two junctions, with its lane layout. */
+export interface LaneRecord {
+  id: string;
+  /** Road class (motorway … minor, service; `_link` suffix for ramps). */
+  c: string;
+  /** Reference line (the OSM way, in the direction of its forward lanes). */
+  g: LngLat[];
+  /** Lane width, metres. */
+  lw: number;
+  /** Offset of the carriageway's left edge from `g`, metres (right of travel positive, so negative). */
+  l: number;
+  /** Forward / backward lane counts (backward is 0 on one-way roads). */
+  f: number;
+  b: number;
+  o: 0 | 1;
+  /** Per-lane turn arrows, left → right in each direction's own travel frame (OSM `turn:lanes` values). */
+  tf: string[] | null;
+  tb: string[] | null;
+  br: 0 | 1;
+  tu: 0 | 1;
+  ly: number;
+  /** Speed limits, km/h: forward / backward. */
+  ms: number | null;
+  mb: number | null;
+  rb: 0 | 1;
+  /** Junction cut-back at the start / end of `g`, metres. */
+  cs: number;
+  ce: number;
+}
+
+export interface RoadTile {
+  key: string;
+  built: string;
+  time: number;
+  lanes: LaneRecord[];
+  /** Drawable features by kind (GeoJSON Feature arrays): surf, jn, mk, ar, ex, sig. */
+  draw: Record<string, any[]>;
+}
+
+export interface RoadScene { surf: any; jn: any; mk: any; ar: any; ex: any; sig: any }
 
 export const tileKey = (x: number, y: number) => `${DETAIL_Z}/${x}/${y}`;
 
@@ -34,20 +65,13 @@ export function tileOf(p: LngLat, z = DETAIL_Z): [number, number] {
   return [Math.floor(((p[0] + 180) / 360) * n), Math.floor(((1 - Math.log(Math.tan(lat) + 1 / Math.cos(lat)) / Math.PI) / 2) * n)];
 }
 
-function tileBbox(x: number, y: number, z = DETAIL_Z): [number, number, number, number] {
-  const n = 2 ** z;
-  const lon = (i: number) => (i / n) * 360 - 180;
-  const lat = (j: number) => { const m = Math.PI - (2 * Math.PI * j) / n; return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(m) - Math.exp(-m))); };
-  return [lat(y + 1), lon(x), lat(y), lon(x + 1)]; // south, west, north, east
-}
-
 // ───────────────────────── IndexedDB cache ─────────────────────────
 let dbp: Promise<IDBDatabase | null> | null = null;
 function db(): Promise<IDBDatabase | null> {
   if (!dbp) {
     dbp = new Promise((resolve) => {
       try {
-        const req = indexedDB.open('teslaplay-roads', 1);
+        const req = indexedDB.open('teslaplay-lanes', 1);
         req.onupgradeneeded = () => req.result.createObjectStore('tiles');
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => resolve(null);
@@ -80,20 +104,20 @@ export class RoadDetails {
   private inflight = new Set<string>();
   private failed = new Map<string, number>();
   private listeners: ((t: RoadTile) => void)[] = [];
-  private endpoint = 0;
-  /** The pre-built dataset's build stamp, or null when it isn't published (→ Overpass). */
+  /** The dataset's build stamp, or null when no usable dataset is published. */
   private meta: Promise<string | null>;
-  /** Where tiles come from right now (Settings → Map services). */
+  /** Where the lane model comes from right now (Settings → Map services). */
   source = 'loading';
 
   constructor(private dataUrl = ROADS_DATA_URL) {
     this.meta = fetch(`${dataUrl}meta.json`, { cache: 'no-cache' })
       .then((r) => (r.ok ? r.json() : null))
       .then((m) => {
-        const built = m && typeof m.built === 'string' ? m.built : null;
-        this.source = built ? `pre-built (OpenStreetMap ${built.slice(0, 10)})` : 'Overpass (live)';
-        return built;
-      }, () => { this.source = 'Overpass (live)'; return null; });
+        if (!m || typeof m.built !== 'string') { this.source = 'not published'; return null; }
+        if ((m.v || 0) < FORMAT) { this.source = `dataset v${m.v} is older than the app (v${FORMAT}) — rebuilding`; return null; }
+        this.source = `pre-built lane model (OpenStreetMap ${m.built.slice(0, 10)})`;
+        return m.built as string;
+      }, () => { this.source = 'unreachable'; return null; });
   }
 
   onTile(cb: (t: RoadTile) => void) { this.listeners.push(cb); }
@@ -120,14 +144,11 @@ export class RoadDetails {
     return out;
   }
 
-  /** Tiles a route passes through, in driving order (capped so a long trip doesn't flood Overpass). */
-  along(coords: LngLat[], max = 40): [number, number][] {
+  /** Tiles a route passes through, in driving order. */
+  along(coords: LngLat[], max = 60): [number, number][] {
     const seen = new Set<string>();
     const out: [number, number][] = [];
-    let last: LngLat | null = null;
     for (const c of coords) {
-      if (last && distance(last, c) < 250) continue;
-      last = c;
       const t = tileOf(c);
       const k = t.join('/');
       if (!seen.has(k)) { seen.add(k); out.push(t); if (out.length >= max) break; }
@@ -135,13 +156,41 @@ export class RoadDetails {
     return out;
   }
 
-  private parallel = 2;
+  /** Everything drawable in these tiles, de-duplicated (a road crossing a tile edge is in both). */
+  scene(keys: string[]): RoadScene {
+    const out: Record<string, any[]> = { surf: [], jn: [], mk: [], ar: [], ex: [], sig: [] };
+    const seen = new Set<string>();
+    for (const k of keys) {
+      const t = this.tiles.get(k);
+      if (!t) continue;
+      for (const kind of Object.keys(out)) {
+        for (const f of t.draw[kind] || []) {
+          const id = `${kind}:${f.properties.id}`;
+          if (seen.has(id)) continue;
+          seen.add(id);
+          out[kind].push(f);
+        }
+      }
+    }
+    const fc = (features: any[]) => ({ type: 'FeatureCollection', features });
+    return { surf: fc(out.surf), jn: fc(out.jn), mk: fc(out.mk), ar: fc(out.ar), ex: fc(out.ex), sig: fc(out.sig) };
+  }
+
+  /** Lane records in the tile under `p` (empty when it isn't loaded). */
+  lanesAt(p: LngLat): LaneRecord[] {
+    const t = this.tiles.get(tileKey(...tileOf(p)));
+    return t ? t.lanes : [];
+  }
+
+  /** Is the tile under `p` loaded? */
+  has(p: LngLat): boolean { return this.tiles.has(tileKey(...tileOf(p))); }
 
   private pump() {
-    while (this.inflight.size < this.parallel && this.queue.length) {
+    while (this.inflight.size < 6 && this.queue.length) {
       const job = this.queue.shift()!;
       this.inflight.add(job.key);
       this.load(job.x, job.y).then((t) => {
+        if (!t) return;
         this.tiles.set(t.key, t);
         this.listeners.forEach((cb) => cb(t));
       }, (e) => {
@@ -151,110 +200,33 @@ export class RoadDetails {
     }
   }
 
-  private async load(x: number, y: number): Promise<RoadTile> {
+  private async load(x: number, y: number): Promise<RoadTile | null> {
     const key = tileKey(x, y);
-    const cached = await idbGet(key);
     const built = await this.meta;
-    if (built) {
-      this.parallel = 6; // static files: no need to be gentle
-      if (cached && cached.built === built) return cached;
-      try {
-        const r = await fetch(`${this.dataUrl}${DETAIL_Z}/${x}/${y}.json`);
-        if (r.status === 404) { const empty: RoadTile = { key, ways: [], signals: [], time: Date.now(), built }; idbPut(empty); return empty; }
-        if (!r.ok) throw new Error(`roads ${r.status}`);
-        const j = await r.json();
-        const tile: RoadTile = {
-          key, built, time: Date.now(),
-          ways: (j.w || []).map((w: any[]) => ({ id: w[0], t: w[1], g: w[2] })),
-          signals: j.s || [],
-          crossings: j.x || [],
-        };
-        idbPut(tile);
-        return tile;
-      } catch (e) {
-        if (cached) return cached;
-        throw e;
-      }
+    const cached = await idbGet(key);
+    if (!built) return cached && cached.lanes ? cached : null;
+    if (cached && cached.built === built && cached.lanes) return cached;
+    try {
+      const r = await fetch(`${this.dataUrl}${DETAIL_Z}/${x}/${y}.json`);
+      if (r.status === 404) { const empty: RoadTile = { key, built, time: Date.now(), lanes: [], draw: {} }; idbPut(empty); return empty; }
+      if (!r.ok) throw new Error(`roads ${r.status}`);
+      const tile = parseTile(key, built, await r.json());
+      idbPut(tile);
+      return tile;
+    } catch (e) {
+      if (cached && cached.lanes) return cached;
+      throw e;
     }
-    if (cached && Date.now() - cached.time < TTL) return cached;
-    const [s, w, n, e] = tileBbox(x, y);
-    const q = `[out:json][timeout:60][bbox:${s.toFixed(5)},${w.toFixed(5)},${n.toFixed(5)},${e.toFixed(5)}];`
-      + `(way[highway~"${HIGHWAYS}"];node[highway=traffic_signals];node[highway=crossing][crossing!=unmarked];);out geom qt;`;
-    let lastErr: unknown = null;
-    for (let attempt = 0; attempt < ENDPOINTS.length; attempt++) {
-      const ep = ENDPOINTS[(this.endpoint + attempt) % ENDPOINTS.length];
-      try {
-        const ac = new AbortController();
-        const timer = setTimeout(() => ac.abort(), 75000);
-        const r = await fetch(ep, { method: 'POST', body: `data=${encodeURIComponent(q)}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ac.signal });
-        clearTimeout(timer);
-        if (!r.ok) throw new Error(`Overpass ${r.status}`);
-        const j = await r.json();
-        const tile = compact(key, j.elements || []);
-        idbPut(tile);
-        return tile;
-      } catch (err) {
-        lastErr = err;
-        this.endpoint = (this.endpoint + 1) % ENDPOINTS.length; // try the other server next time
-      }
-    }
-    if (cached) return cached; // stale beats nothing
-    throw lastErr;
-  }
-
-  /**
-   * Metres to shift each route vertex to the right so the line sits in the lanes of travel instead of
-   * on the road's centre line: half the forward carriageway on two-way roads, 0 on one-way roads and
-   * where the road is unknown. `heading` per vertex comes from the route itself.
-   */
-  driveSideOffsets(coords: LngLat[]): number[] { return this.driveBands(coords).map((b) => b.off); }
-
-  /** Per vertex: metres to shift right, and width (m) of the carriageway the car drives in (0 = unknown). */
-  driveBands(coords: LngLat[]): { off: number; w: number }[] {
-    const out: { off: number; w: number }[] = coords.map(() => ({ off: 0, w: 0 }));
-    let tile: RoadTile | undefined;
-    let key = '';
-    for (let i = 0; i < coords.length; i++) {
-      const p = coords[i];
-      const k = tileKey(...tileOf(p));
-      if (k !== key) { key = k; tile = this.tiles.get(k); }
-      if (!tile) continue;
-      const nxt = coords[Math.min(i + 1, coords.length - 1)], prv = coords[Math.max(i - 1, 0)];
-      const h = bearing(prv, nxt);
-      let best: { d: number; off: number; w: number } | null = null;
-      for (const w of tile.ways) {
-        const m = laneModel(w.t);
-        if (!m || m.tunnel) continue;
-        // Signed distance from the route vertex to the way's centre line (positive = vertex is right of it),
-        // in the direction of travel, so the band lands on the road however far the router's line is from OSM's.
-        const near = nearestOnWay(p, w.g, h, 12, !m.oneway);
-        if (!near || (best && near.d >= best.d)) continue;
-        // One-way: centre the band on the carriageway. Two-way: on the forward lanes.
-        // Two-way roads driven against the way's direction use its backward lanes.
-        const lanes = m.oneway ? m.F + m.B : near.along ? m.F : m.B;
-        best = { d: near.d, off: -near.signed + (m.oneway ? 0 : (lanes * m.lw) / 2), w: lanes * m.lw };
-      }
-      if (best) out[i] = { off: best.off, w: best.w };
-    }
-    // Smooth single-vertex gaps so the band doesn't zig-zag between matched and unmatched ways.
-    for (let i = 1; i < out.length - 1; i++) {
-      if (!out[i].w && out[i - 1].w && out[i + 1].w) out[i] = { off: (out[i - 1].off + out[i + 1].off) / 2, w: (out[i - 1].w + out[i + 1].w) / 2 };
-    }
-    return out;
   }
 
   /**
    * Posted limit (km/h) of the road at `p` for a car heading `heading` (degrees), from any loaded
-   * tile; null when unknown. Matches the nearest tagged way within 18 m running the same way.
+   * tile; null when unknown. Nearest tagged road within 18 m running the same way.
    */
   speedLimitAt(p: LngLat, heading: number | null): number | null {
-    const key = tileKey(...tileOf(p));
-    const tile = this.tiles.get(key);
-    if (!tile) return null;
     let best: { d: number; v: number | null } | null = null;
-    for (const w of tile.ways) {
-      const t = w.t;
-      if (!t.maxspeed && !t['maxspeed:forward'] && !t['maxspeed:backward']) continue;
+    for (const w of this.lanesAt(p)) {
+      if (w.ms === null && w.mb === null) continue;
       for (let i = 0; i < w.g.length - 1; i++) {
         const d = segDistance(p, w.g[i], w.g[i + 1]);
         if (d > 18 || (best && d >= best.d)) continue;
@@ -264,63 +236,31 @@ export class RoadDetails {
           const diff = Math.abs(((heading - b + 540) % 360) - 180);
           if (diff > 40 && diff < 140) continue; // crossing road
           forward = diff <= 90;
-          if (!forward && isOneway(t) === 1) continue;
+          if (!forward && w.o) continue;
         }
-        const v = parseSpeed((forward ? t['maxspeed:forward'] : t['maxspeed:backward']) || t.maxspeed);
-        best = { d, v };
+        best = { d, v: forward ? w.ms : w.mb };
       }
     }
     return best ? best.v : null;
   }
 }
 
-function compact(key: string, elements: any[]): RoadTile {
-  const ways: RoadWay[] = [];
-  const signals: LngLat[] = [];
-  const crossings: LngLat[] = [];
-  for (const el of elements) {
-    if (el.type === 'node' && typeof el.lon === 'number') (el.tags && el.tags.highway === 'crossing' ? crossings : signals).push([+el.lon.toFixed(6), +el.lat.toFixed(6)]);
-    else if (el.type === 'way' && Array.isArray(el.geometry) && el.geometry.length > 1) {
-      const t: Record<string, string> = {};
-      for (const k of KEEP) if (el.tags && el.tags[k] !== undefined) t[k] = String(el.tags[k]);
-      ways.push({ id: el.id, g: el.geometry.map((p: any) => [+p.lon.toFixed(6), +p.lat.toFixed(6)] as LngLat), t });
-    }
-  }
-  return { key, ways, signals, crossings, time: Date.now() };
+/** Tile JSON (see lanes.py) → lane records + GeoJSON features per kind. */
+export function parseTile(key: string, built: string, j: any): RoadTile {
+  const draw: Record<string, any[]> = { surf: [], jn: [], mk: [], ar: [], ex: [], sig: [] };
+  const poly = (kind: string, props: (f: any) => any) => {
+    for (const f of j[kind] || []) draw[kind].push({ type: 'Feature', properties: { id: f.id, ...props(f) }, geometry: { type: 'Polygon', coordinates: [f.g] } });
+  };
+  poly('surf', (f) => ({ c: f.c, br: f.br, tu: f.tu, ly: f.ly }));
+  poly('jn', (f) => ({ ly: f.ly }));
+  poly('ex', (f) => ({ k: f.k, b: f.b, h: f.h }));
+  for (const f of j.mk || []) draw.mk.push({ type: 'Feature', properties: { id: f.id, k: f.k, ly: f.ly, br: f.br }, geometry: { type: 'LineString', coordinates: f.g } });
+  for (const f of j.ar || []) draw.ar.push({ type: 'Feature', properties: { id: f.id, icon: `ta:${f.a}`, rot: f.r }, geometry: { type: 'Point', coordinates: f.g } });
+  for (const s of j.s || []) draw.sig.push({ type: 'Feature', properties: { id: `${s[0]},${s[1]}` }, geometry: { type: 'Point', coordinates: s } });
+  return { key, built, time: Date.now(), lanes: (j.w || []) as LaneRecord[], draw };
 }
 
-/** "50" / "60 mph" / "GE:urban" → km/h (null when unknown or unlimited). */
-export function parseSpeed(v: string | undefined): number | null {
-  if (!v) return null;
-  const m = /^(\d+(?:\.\d+)?)\s*(mph|km\/h|kmh)?/i.exec(v.trim());
-  if (m) return Math.round(+m[1] * (m[2] && /mph/i.test(m[2]) ? 1.609 : 1));
-  const zone: Record<string, number> = { urban: 60, rural: 90, motorway: 110, living_street: 20 };
-  const z = /:(\w+)$/.exec(v);
-  return z && zone[z[1]] ? zone[z[1]] : null;
-}
-
-/**
- * Nearest segment of `g` running within ±60° of `heading` (or against it too, when `eitherWay`):
- * distance and signed offset of `p` from it (positive = p is right of the direction of travel).
- */
-function nearestOnWay(p: LngLat, g: LngLat[], heading: number, max: number, eitherWay: boolean): { d: number; signed: number; along: boolean } | null {
-  let best: { d: number; signed: number; along: boolean } | null = null;
-  for (let i = 0; i < g.length - 1; i++) {
-    const d = segDistance(p, g[i], g[i + 1]);
-    if (d > max || (best !== null && d >= best.d)) continue;
-    const segB = bearing(g[i], g[i + 1]);
-    const diff = Math.abs(((heading - segB + 540) % 360) - 180);
-    const along = diff <= 60, against = diff >= 120;
-    if (!along && !(eitherWay && against)) continue;
-    // Direction of travel along this segment: with its geometry when the car heads that way.
-    const travelB = along ? segB : segB + 180;
-    const side = Math.sign(Math.sin(toRad(bearing(g[i], p) - travelB)));
-    best = { d, signed: side * d, along };
-  }
-  return best;
-}
-
-function segDistance(p: LngLat, a: LngLat, b: LngLat): number {
+export function segDistance(p: LngLat, a: LngLat, b: LngLat): number {
   const kx = Math.cos(toRad(p[1])) * 111320;
   const ky = 110540;
   const ax = (a[0] - p[0]) * kx, ay = (a[1] - p[1]) * ky;

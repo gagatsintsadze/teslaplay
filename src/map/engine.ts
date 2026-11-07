@@ -58,8 +58,8 @@ export interface MapEngine {
   onViewChange(cb: (v: ViewState) => void): void;
   onClick(cb: (e: MapClick) => void): void;
   onLongPress(cb: (e: MapClick) => void): void;
-  /** Optional: lane-level detail (FeatureCollections from map/lanes.ts). */
-  setRoadDetails?(d: { lines: any; arrows: any; signals: any; solids?: any }): void;
+  /** Optional: the lane model to draw (services/roads.ts). */
+  setRoadDetails?(scene: import('../services/roads').RoadScene): void;
   /**
    * Driving overlays (optional): `ahead` is the next stretch of route — buildings standing on it
    * are flattened and ghosted so they never hide the line; `maneuver` is a short path through

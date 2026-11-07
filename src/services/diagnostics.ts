@@ -80,11 +80,12 @@ export async function runServiceCheck(app: App): Promise<CheckResult[]> {
     return `${Math.round(t.duration / 60)} min to a point ${(t.distance / 1000).toFixed(1)} km away`;
   } : null, 'No Mapbox token — nearby results sorted by distance');
 
-  add('roads', 'Lanes, speed limits & traffic lights', app.roads ? async () => {
+  add('roads', 'Lane model (lanes, markings, speed limits, traffic lights)', app.roads ? async () => {
     const r = await fetch(`${ROADS_DATA_URL}meta.json`, { cache: 'no-cache' });
-    if (!r.ok) throw new Error(`Pre-built data not published (HTTP ${r.status}) — using Overpass, slow`);
+    if (!r.ok) throw new Error(`Lane model not published (HTTP ${r.status})`);
     const m = await r.json();
-    return `${m.tiles} areas, ${m.ways} roads, ${m.signals} traffic lights · OpenStreetMap ${String(m.built).slice(0, 10)}`;
+    if ((m.v || 0) < 3) throw new Error(`Published lane model is format v${m.v}; this app needs v3 — the weekly build will refresh it`);
+    return `${m.tiles} areas, ${m.parts || m.ways} road sections, ${m.signals} traffic lights · OpenStreetMap ${String(m.built).slice(0, 10)}`;
   } : null);
 
   add('osrm', 'OpenStreetMap routing', async () => {
@@ -135,7 +136,7 @@ export function activeProviders(app: App, results: CheckResult[]): { label: stri
     { label: 'Map', value: app.cfg.demo ? 'Demo' : ok('map') ? 'OpenStreetMap (Drive style)' : 'Not loading' },
     { label: 'Directions', value: ok('mapbox') ? 'Mapbox — live traffic' : ok('osrm') ? 'OpenStreetMap (OSRM) — no traffic' : 'Unavailable' },
     { label: 'Traffic on the map', value: ok('traffic') ? 'Mapbox' : 'Off' },
-    { label: 'Lane details', value: ok('roads') ? 'Pre-built OpenStreetMap data' : app.roads ? 'Overpass (live, slow)' : 'Off' },
+    { label: 'Lane model', value: ok('roads') ? 'Pre-built from OpenStreetMap' : 'Unavailable' },
     { label: 'Search', value: ok('photon') ? 'OpenStreetMap (Photon)' : 'Unavailable' },
     { label: 'Nearby places', value: (ok('overpass') ? 'OpenStreetMap' : 'Unavailable') + (ok('matrix') ? ' · drive times by Mapbox' : '') },
     { label: 'EV chargers', value: ok('ocm') ? 'Open Charge Map' : ok('overpass') ? 'OpenStreetMap' : has('ocm') ? 'Unavailable' : 'Unavailable' },

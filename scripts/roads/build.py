@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Build Teslaplay's lane-level road details from an OpenStreetMap extract.
+Stage 1 of Teslaplay's road pipeline: pull the drivable roads out of an OpenStreetMap extract.
 
-    python scripts/roads/build.py georgia-latest.osm.pbf out/
+    python scripts/roads/build.py georgia-latest.osm.pbf raw/
+    python scripts/roads/lanes.py raw/ out/          # stage 2: the lane model the app draws
 
-Writes out/14/<x>/<y>.json for every zoom-14 tile (~1.8 km in Georgia) that has data:
+Writes raw/14/<x>/<y>.json for every zoom-14 tile (~1.8 km in Georgia) that has data:
 
     {"v": 1, "w": [[way_id, {tags}, [[lon, lat], ...]], ...], "s": [[lon, lat], ...]}
 
@@ -13,8 +14,8 @@ Writes out/14/<x>/<y>.json for every zoom-14 tile (~1.8 km in Georgia) that has 
 - "s": traffic lights (highway=traffic_signals)
 - "x": pedestrian crossings (highway=crossing) — drawn as zebra stripes
 
-plus out/meta.json. The app loads these files instead of asking Overpass, so road details show
-instantly anywhere in the country. Run weekly by .github/workflows/roads.yml.
+plus raw/meta.json. lanes.py turns these into the lane model (asphalt, junctions, markings, arrows)
+published for the app. Run weekly by .github/workflows/roads.yml.
 """
 import json
 import math
@@ -31,7 +32,8 @@ HIGHWAYS = {'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassifi
 RELEVANT_UNUSED = {'lanes', 'lanes:forward', 'lanes:backward', 'turn:lanes', 'turn:lanes:forward', 'turn:lanes:backward',
             'maxspeed', 'maxspeed:forward', 'maxspeed:backward'}
 KEEP = ['highway', 'lanes', 'lanes:forward', 'lanes:backward', 'oneway', 'junction', 'turn:lanes', 'turn:lanes:forward',
-        'turn:lanes:backward', 'maxspeed', 'maxspeed:forward', 'maxspeed:backward', 'divider', 'bridge', 'tunnel', 'layer']
+        'turn:lanes:backward', 'maxspeed', 'maxspeed:forward', 'maxspeed:backward', 'divider', 'bridge', 'tunnel', 'layer',
+        'width', 'placement', 'placement:forward', 'name']
 STEP_M = 250  # sample long segments so a way is filed under every tile it crosses
 
 
