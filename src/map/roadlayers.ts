@@ -79,6 +79,7 @@ export function addRoadLayers(map: any, theme: 'light' | 'dark') {
     mark('cl2', hair);
     mark('div', hair, { 'line-dasharray': dashM(3, 9, 0.15, 1) });   // 3 m dash, 9 m gap (line 1.5)
     mark('cl1', hair, { 'line-dasharray': dashM(3, 6, 0.15, 1) });   // 3 m dash, 6 m gap: two-way centre line
+    mark('guide', hair, { 'line-dasharray': dashM(0.5, 0.5, 0.15, 1), 'line-opacity': fade(16.1, 16.8, 0.7) }); // lane guide lines across junctions (line 1.7)
     mark('stop', metres(0.4, 1.5));
     mark('zebra', metres(3.2, 2), { 'line-dasharray': dashM(0.5, 0.5, 3.2, 2), 'line-opacity': fade(16.1, 16.8, 0.85) }); // 0.5 m stripes
   }

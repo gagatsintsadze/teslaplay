@@ -424,9 +424,14 @@ def build(raw):
                     continue  # the road continues straight through: no cut against it
                 s = max(math.sin(th), 0.2)
                 c = (q.lay['W'] / 2) / s
-                if th < math.radians(90):
-                    c += (p.lay['W'] / 2) / max(math.tan(th), 0.2)
-                c = min(c, 2.0 * (p.lay['W'] + q.lay['W']))
+                if q.lay['W'] < 0.7 * p.lay['W']:
+                    # A minor road joining a major one: the major road keeps its markings right up to
+                    # the side road's kerb line, as nav maps draw it; only the side road is cut back.
+                    c = min(c + 0.3, q.lay['W'] + 1.5)
+                else:
+                    if th < math.radians(90):
+                        c += (p.lay['W'] / 2) / max(math.tan(th), 0.2)
+                    c = min(c, 2.0 * (p.lay['W'] + q.lay['W']))
                 cut = max(cut, c)
             cut = min(cut, MAX_CUT, p.L * 0.45)
             if at_end:
@@ -591,6 +596,7 @@ def emit(parts, ends, signals):
                 portal(p, fr, q, u, add)
         if all((p.ce if at_end else p.cs) == 0 for p, at_end in lst):
             continue  # plain join, nothing was cut
+        guides(node, lst, add)
         p0 = lst[0][0]
         fr = p0.frame
         pts = [fr.to_m(node)]
@@ -623,6 +629,52 @@ def emit(parts, ends, signals):
     for s in signals:
         add('s', [s[0], s[1]], [s])
     return feats
+
+
+def guides(node, lst, add):
+    """Dashed guide lines (line 1.7) carrying the lane dividers of a road straight across the junction
+    to the continuing road, so wide junctions still show where the lanes go."""
+    ends = []
+    for p, at_end in lst:
+        m = p.m
+        u = (m[-2][0] - m[-1][0], m[-2][1] - m[-1][1]) if at_end else (m[1][0] - m[0][0], m[1][1] - m[0][1])
+        L = math.hypot(*u) or 1.0
+        u = (u[0] / L, u[1] / L)                      # pointing away from the node
+        lay = p.lay
+        N = lay['f'] + lay['b']
+        # same-direction dividers only, as offsets in the "away" frame (right of `u` positive)
+        divs = []
+        for i in range(1, N):
+            if lay['b'] and i == lay['b']:
+                continue
+            off = lay['l'] + i * lay['lw']
+            divs.append(off if not at_end else -off)
+        s = (p.L - p.ce) if at_end else p.cs
+        q, d = point_at(m, s)
+        ends.append((p, at_end, u, divs, q, N, lay['lw']))
+    for a in range(len(ends)):
+        for b in range(a + 1, len(ends)):
+            pa, ea, ua, da, qa, Na, lwa = ends[a]
+            pb, eb, ub, db, qb, Nb, lwb = ends[b]
+            dot = ua[0] * ub[0] + ua[1] * ub[1]
+            if dot > -0.85 or Na != Nb or abs(lwa - lwb) > 0.3 or not da:
+                continue  # only straight continuations with the same lane layout
+            na = (ua[1], -ua[0])
+            nb = (ub[1], -ub[0])
+            gap = math.hypot(qa[0] - qb[0], qa[1] - qb[1])
+            if gap < 3.0 or gap > 80:
+                continue
+            fr = pa.frame
+            for k, off in enumerate(da):
+                # the matching divider on the other road sits at -off in its own away frame
+                match = [o for o in db if abs(o + off) < 0.3]
+                if not match:
+                    continue
+                o2 = match[0]
+                p1 = (qa[0] + na[0] * off, qa[1] + na[1] * off)
+                p2 = (qb[0] + nb[0] * o2, qb[1] + nb[1] * o2)
+                pts = [fr.to_ll(p1), fr.to_ll(p2)]
+                add('mk', {'id': f'g{node[0]}_{node[1]}_{pa.id}_{k}', 'k': 'guide', 'g': pts, 'ly': pa.lay['ly'], 'br': 0}, pts)
 
 
 def stop(p, s, off_a, off_b, kind, add):
