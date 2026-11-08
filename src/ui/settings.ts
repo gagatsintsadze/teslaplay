@@ -130,7 +130,7 @@ export function mountSettings(app: App, hud: HTMLElement) {
         row('Voice guidance', app.voice.canSpeak ? null : 'No speech voice in this browser — chimes instead', sw(st.voice, () => set({ voice: !st.voice }), 'Voice guidance')),
         row('Avoid tolls', null, sw(st.avoidTolls, () => set({ avoidTolls: !st.avoidTolls }), 'Avoid tolls')),
         row('3D perspective', 'Tilted map with buildings while driving', sw(st.view3D, () => set({ view3D: !st.view3D }), '3D perspective')),
-        row('Car on the map', 'Shown while driving', seg('car', st.carMarker, [['sedan', 'Sedan'], ['suv', 'SUV'], ['arrow', 'Arrow']], (c) => set({ carMarker: c }))),
+        row('Car on the map', 'Shown while driving', seg('car', st.carMarker, [['model', '3D car'], ['sedan', 'Sedan'], ['suv', 'SUV'], ['arrow', 'Arrow']], (c) => set({ carMarker: c }))),
         row('Car colour', null, h('div.car-swatches', { role: 'radiogroup', 'aria-label': 'Car colour' }, ...CAR_COLORS.map(([val, name]) => h('button.car-swatch' + (val === st.carColor ? '.on' : ''), { type: 'button', role: 'radio', 'aria-checked': String(val === st.carColor), 'aria-label': name, title: name, style: { background: val }, onclick: () => set({ carColor: val }) })))),
         row('Live traffic', s.trafficAvailable ? 'Mapbox · updates every few minutes' : 'Add a Mapbox token under Map data', sw(st.traffic && s.trafficAvailable, () => set({ traffic: !st.traffic }), 'Live traffic')),
         row('Units', null, seg('units', st.units, [['metric', 'Kilometres'], ['imperial', 'Miles']], (u) => set({ units: u }))),

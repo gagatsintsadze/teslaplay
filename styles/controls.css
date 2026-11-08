@@ -90,6 +90,9 @@
 .puck.car .puck-car { display: block; }
 .puck.car .puck-core, .puck.car .puck-cone, .puck.car .puck-arrow { display: none; }
 .puck.car .puck-halo { animation: none; opacity: 0; }
+/* 3-D model: the map draws the car itself; only a soft ground shadow stays in the DOM */
+.puck.model .puck-core, .puck.model .puck-cone, .puck.model .puck-arrow, .puck.model .puck-car { display: none; }
+.puck.model .puck-halo { animation: none; opacity: .35; width: 2.6rem; height: 2.6rem; margin: -1.3rem 0 0 -1.3rem; background: radial-gradient(circle, rgba(0,0,0,.45), rgba(0,0,0,0) 70%); }
 .car-swatches { display: flex; gap: .5rem; }
 .car-swatch { width: 2.2rem; height: 2.2rem; border-radius: 50%; border: 3px solid transparent; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .25); cursor: pointer; }
 .car-swatch.on { border-color: var(--blue); }

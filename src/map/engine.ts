@@ -52,7 +52,9 @@ export interface MapEngine {
   setPadding(p: Padding): void;
   setRoutes(lines: RouteLine[]): void;
   setMarkers(layer: string, markers: MarkerSpec[]): void;
-  setUserMarker(coord: LngLat | null, el: HTMLElement): void;
+  setUserMarker(coord: LngLat | null, el: HTMLElement, heading?: number): void;
+  /** Optional: a 3-D car model drawn at the user's position instead of the DOM puck. */
+  setCarModel?(enabled: boolean, color: string): void;
   /** Fired when the user drags/zooms/rotates the map (not for programmatic moves). */
   onUserGesture(cb: () => void): void;
   onViewChange(cb: (v: ViewState) => void): void;

@@ -4,6 +4,7 @@ import { attachGestureWatcher } from './gestures';
 import { trafficTilesUrl } from '../services/mapbox';
 import { arrowImage, turnSet } from './arrows';
 import { addRoadLayers, metres, setRoadScene } from './roadlayers';
+import { CarLayer } from './car3d';
 import type { RoadScene } from '../services/roads';
 import { buildStyle, PALETTES } from './style';
 
@@ -223,6 +224,7 @@ export class OsmEngine implements MapEngine {
     }
     addRoadLayers(map, this.theme);
     if (this.scene) setRoadScene(map, this.scene);
+    if (this.carWanted) this.applyCar();
     this.applyTraffic();
     this.paintRoutes();
     this.applyNavOverlay();
@@ -468,7 +470,34 @@ export class OsmEngine implements MapEngine {
     this.layers.set(layer, next);
   }
 
-  setUserMarker(coord: LngLat | null, el: HTMLElement) {
+  private car: CarLayer | null = null;
+  private carWanted = false;
+  private carColor = '#e8eaf0';
+
+  /** The 3-D car (map/car3d.ts): added lazily, kept across style reloads. */
+  setCarModel(enabled: boolean, color: string) {
+    this.carWanted = enabled;
+    this.carColor = color;
+    this.applyCar();
+  }
+
+  private applyCar() {
+    if (!this.map) return;
+    if (!this.map.isStyleLoaded()) { this.map.once('idle', () => this.applyCar()); return; }
+    if (this.carWanted && !this.car) {
+      this.car = new CarLayer(this.gl, this.map, { url: 'models/car.glb', length: 4.7 });
+    }
+    if (this.car) {
+      this.car.setPaint(this.carColor);
+      this.car.visible = this.carWanted;
+      if (this.carWanted && !this.map.getLayer('tp-car')) this.map.addLayer(this.car);
+      if (!this.carWanted && this.map.getLayer('tp-car')) this.map.removeLayer('tp-car');
+      this.map.triggerRepaint();
+    }
+  }
+
+  setUserMarker(coord: LngLat | null, el: HTMLElement, heading = 0) {
+    if (this.car) this.car.update(coord, heading);
     if (!coord) {
       if (this.user) { this.user.remove(); this.user = null; }
       return;

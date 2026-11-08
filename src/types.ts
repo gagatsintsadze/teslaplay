@@ -158,7 +158,7 @@ export interface Settings {
   traffic: boolean;
   view3D: boolean;
   /** Marker shown while driving: an arrow or a car, and the car's colour. */
-  carMarker: 'arrow' | 'sedan' | 'suv';
+  carMarker: 'model' | 'arrow' | 'sedan' | 'suv';
   carColor: string;
   devTools: boolean;
 }

@@ -82,7 +82,7 @@ const SUV = `<svg viewBox="0 0 64 128" width="56" height="112">${CAR_DEFS}
   <rect x="14" y="119" width="11" height="4" rx="2" fill="#ff3b30"/><rect x="39" y="119" width="11" height="4" rx="2" fill="#ff3b30"/>
 </svg>`;
 
-export type CarMarker = 'arrow' | 'sedan' | 'suv';
+export type CarMarker = 'model' | 'arrow' | 'sedan' | 'suv';
 
 export interface Puck {
   el: HTMLElement;
@@ -106,9 +106,10 @@ export function createPuck(): Puck {
     el,
     setCar(kind, color) {
       car.innerHTML = '';
-      if (kind !== 'arrow') car.appendChild(svg(kind === 'suv' ? SUV : SEDAN));
+      if (kind === 'sedan' || kind === 'suv') car.appendChild(svg(kind === 'suv' ? SUV : SEDAN));
       car.style.setProperty('--car', color);
-      toggleClass(puck, 'car', kind !== 'arrow');
+      toggleClass(puck, 'car', kind === 'sedan' || kind === 'suv');
+      toggleClass(puck, 'model', kind === 'model');
     },
     update(heading, nav, stale) {
       toggleClass(puck, 'nav', nav);

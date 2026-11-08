@@ -80,7 +80,8 @@ src/
     roadlayers.ts    MapLibre layers for the pre-built lane model (asphalt, junctions, markings, arrows, parapets, portals) + the exact-metres width expression
     arrows.ts        painted turn-arrow shapes (map icons + banner glyphs), traffic-light icon
     demo.ts          offline Web-Mercator engine used by demo mode
-    markers.ts       pins, charger badges, the user puck
+    markers.ts       pins, charger badges, the user puck (arrow, sedan/SUV sprites)
+    car3d.ts         the 3-D car: a dependency-free glTF-binary loader + MapLibre custom layer (lit, heading-aligned, paint colour from Settings)
     gestures.ts      detects real user pans/zooms → drops out of follow mode
   nav/
     session.ts       turn-by-turn: map-matching, progress, ETA, off-route → reroute, voice prompts
@@ -123,6 +124,8 @@ Roads are drawn from an explicit **lane model built offline**, the way HD-map na
 Everything is computed in metres in a local frame and written back as coordinates, so `map/roadlayers.ts` only needs fill layers for polygons and metric strokes for lines: `metres()` converts metres to pixels per zoom (exponential base 2, the Web Mercator scale) with a one-pixel floor for hairlines, and dash patterns are rescaled per zoom so a 3 m dash is 3 m at every zoom. Level of detail: asphalt and junctions fade in at z15.3 over the base style's roads, markings at z16.1, arrows at z16.6.
 
 **Route on its lanes** (`nav/laneroute.ts`): every route vertex is matched to a lane record and moved to the centre of the lanes the car should be in — by default all lanes of the direction of travel; from 180 m before a turn only the lanes that lead there (Mapbox's lane flags when it sends them, else `turn:lanes`, else the lane on the turning side), with lane changes blended over 90 m. The band is drawn as wide as those lanes and the car glides along it. Where no lane record is within 16 m the route stays where the router put it.
+
+**The car on the map** (Settings → Navigation): a 3-D model (`public/models/car.glb`, a Sketchfab download of a 2018 Model 3 shrunk from 22 MB to 0.7 MB by `scripts/car/optimize.mjs` — interior removed, meshes simplified, textures 192 px WebP, quantised; check the model's licence on Sketchfab and credit the author if it requires it), or a top-down sedan/SUV sprite, or the classic arrow, in seven paint colours. The model is drawn by `map/car3d.ts` without three.js, scaled to at least 64 px long so it reads at every zoom.
 
 While driving, the speed-limit sign uses Mapbox's `maxspeed` along the route, else the OSM `maxspeed` of the road you're on; it pulses red at 5+ km/h over. Mapbox lane data at each maneuver feeds the lane-guidance row under the turn banner. Coverage follows OpenStreetMap: very good in Tbilisi and Batumi, good in Kutaisi, Rustavi and on the E60, sparser in small towns (roads without lane tags are drawn as 1+1 or one lane). To cover neighbouring countries, add Geofabrik regions to `REGIONS` in the workflow (e.g. `asia/armenia asia/azerbaijan`).
 

@@ -84,7 +84,7 @@ export const DEFAULT_SETTINGS: Settings = {
   textSize: isTesla ? 'large' : 'standard',
   traffic: true,
   view3D: true,
-  carMarker: 'sedan',
+  carMarker: 'model',
   carColor: '#e8eaf0',
   devTools: false,
 };

@@ -117,6 +117,7 @@ export class App {
     });
     this.follow.tilt3D = this.state.settings.view3D;
     this.puck.setCar(this.state.settings.carMarker, this.state.settings.carColor);
+    this.applyCarModel(this.state.settings);
     // 3D on: open tilted so buildings stand up (the engine caps it; the demo map stays flat).
     if (this.follow.exploreTilt) this.engine.setView({ tilt: this.follow.exploreTilt, zoom: Math.max(16.2, this.engine.getView().zoom), duration: 1200 });
     this.engine.onUserGesture(() => { if (this.follow.mode !== 'none') this.follow.setMode('none'); });
@@ -265,6 +266,10 @@ export class App {
   }
 
   // ───────────────────────── settings / appearance ─────────────────────────
+  private applyCarModel(s: Settings) {
+    if (this.engine.setCarModel) this.engine.setCarModel(s.carMarker === 'model', s.carColor);
+  }
+
   updateSettings(patch: Partial<Settings>) {
     const settings = { ...this.state.settings, ...patch };
     if ('glass' in patch) this.materialStep = 0;
@@ -273,7 +278,7 @@ export class App {
     this.applySettings(settings, false);
     if ('themeMode' in patch) this.applyTheme();
     if ('traffic' in patch) this.setTraffic(!!patch.traffic);
-    if ('carMarker' in patch || 'carColor' in patch) this.puck.setCar(settings.carMarker, settings.carColor);
+    if ('carMarker' in patch || 'carColor' in patch) { this.puck.setCar(settings.carMarker, settings.carColor); this.applyCarModel(settings); }
     if ('view3D' in patch) {
       this.follow.tilt3D = !!patch.view3D;
       if (!this.state.navigating) this.engine.setView({ tilt: this.follow.exploreTilt, duration: 500 });

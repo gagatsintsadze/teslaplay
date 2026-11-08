@@ -140,7 +140,7 @@ export class FollowController {
 
     const view = this.engine.getView();
     const stale = Date.now() - fix.time > 15000;
-    this.engine.setUserMarker(this.disp, this.puck.el);
+    this.engine.setUserMarker(this.disp, this.puck.el, this.heading);
     this.puck.update(this.hasHeading ? this.heading - view.azimuth : null, this.navigating && this.mode === 'course', stale);
 
     const camInterval = this.opts.lite() ? 66 : 33;
