@@ -46,6 +46,23 @@ export interface LaneRecord {
   ce: number;
   /** Height above ground per vertex of `g`, metres — only on bridges and their ramps. */
   hz?: number[];
+  /** OSM change:lanes per lane (yes | no | not_left | not_right), forward / backward travel frames. */
+  cf?: string[];
+  cb?: string[];
+  /** Bus/PSV lanes (1) per lane, forward / backward travel frames. */
+  bf?: number[];
+  bb?: number[];
+  /** Junction connectivity for forward / backward travel: how this road's lanes feed each road it can leave by. */
+  cn?: LaneConnection[];
+  cnb?: LaneConnection[];
+}
+
+export interface LaneConnection {
+  /** record id of the road left by, and its travel direction there ('f' | 'b') */
+  to: string; d: 'f' | 'b';
+  t: 'through' | 'left' | 'right' | 'uturn';
+  /** [fromLane, toLane] pairs, travel frames (0 = leftmost) */
+  m: [number, number][];
 }
 
 export interface RoadTile {

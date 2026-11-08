@@ -33,7 +33,10 @@ RELEVANT_UNUSED = {'lanes', 'lanes:forward', 'lanes:backward', 'turn:lanes', 'tu
             'maxspeed', 'maxspeed:forward', 'maxspeed:backward'}
 KEEP = ['highway', 'lanes', 'lanes:forward', 'lanes:backward', 'oneway', 'junction', 'turn:lanes', 'turn:lanes:forward',
         'turn:lanes:backward', 'maxspeed', 'maxspeed:forward', 'maxspeed:backward', 'divider', 'bridge', 'tunnel', 'layer',
-        'width', 'placement', 'placement:forward', 'name']
+        'width', 'placement', 'placement:forward', 'name',
+        'change:lanes', 'change:lanes:forward', 'change:lanes:backward',
+        'bus:lanes', 'bus:lanes:forward', 'bus:lanes:backward', 'psv:lanes', 'psv:lanes:forward', 'psv:lanes:backward',
+        'lanes:bus', 'lanes:bus:forward', 'lanes:bus:backward', 'lanes:psv', 'lanes:psv:forward', 'lanes:psv:backward', 'busway']
 STEP_M = 250  # sample long segments so a way is filed under every tile it crosses
 
 

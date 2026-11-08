@@ -1,4 +1,4 @@
-import type { LaneRecord } from '../services/roads';
+import type { LaneConnection, LaneRecord } from '../services/roads';
 import type { Maneuver } from '../types';
 
 /**
@@ -43,22 +43,39 @@ const LANE_LEAD_MIN = 150;  // metres per lane change, at least
 
 const turnsOf = (r: LaneRecord, forward: boolean) => (forward ? r.tf : r.tb);
 
-/** Allowed lanes for manoeuvre `m` when approached on `sec` (null = any). */
-export function allowedLanes(m: Maneuver, sec: Section): number[] | null {
+/** The junction connection from `sec` into `next`, when the pipeline recorded one. */
+function connection(sec: Section, next: Section | undefined): LaneConnection | null {
+  if (!next) return null;
+  const list = sec.forward ? sec.rec.cn : sec.rec.cnb;
+  if (!list) return null;
+  return list.find((c) => c.to === next.rec.id && c.d === (next.forward ? 'f' : 'b')) || null;
+}
+
+const busLanes = (sec: Section) => (sec.forward ? sec.rec.bf : sec.rec.bb) || null;
+const notBus = (sec: Section, lanes: number[]) => { const b = busLanes(sec); const out = b ? lanes.filter((i) => !b[i]) : lanes; return out.length ? out : lanes; };
+
+/** Allowed lanes for manoeuvre `m` when approached on `sec` (null = any). Junction connectivity first, then Mapbox, then arrows. */
+export function allowedLanes(m: Maneuver, sec: Section, next?: Section): number[] | null {
   const n = sec.count;
   if (n <= 1) return null;
   const left = /left/.test(m.type) || m.type === 'uturn';
   const right = /right/.test(m.type);
+  const cn = connection(sec, next);
+  if (cn && cn.m.length) {
+    const src = Array.from(new Set(cn.m.map(([a]) => a))).sort((a, b) => a - b);
+    if (src.length < n) return notBus(sec, src);
+    if (!left && !right) return null;
+  }
   if (m.lanes && m.lanes.length === n) {
     const valid = m.lanes.map((l, i) => (l.valid ? i : -1)).filter((i) => i >= 0);
-    if (valid.length && valid.length < n) return valid;
+    if (valid.length && valid.length < n) return notBus(sec, valid);
     if (valid.length === n) return null;
   }
   const turns = turnsOf(sec.rec, sec.forward);
   if (turns) {
     const want = left ? /left|reverse/ : right ? /right/ : /through|none|^$/;
     const idx = turns.map((t, i) => (want.test(t) ? i : -1)).filter((i) => i >= 0);
-    if (idx.length && idx.length < n) return idx;
+    if (idx.length && idx.length < n) return notBus(sec, idx);
     if (idx.length === n) return null;
     // arrows exist but none match (e.g. a slight turn tagged as "through"): fall through to the side rule
   }
@@ -70,10 +87,22 @@ export function allowedLanes(m: Maneuver, sec: Section): number[] | null {
 /** Lanes a car should not sit in when nothing forces it: unmarked lanes beside arrowed ones (bus, parking). */
 function usableLanes(sec: Section): number[] {
   const turns = turnsOf(sec.rec, sec.forward);
-  const all = Array.from({ length: sec.count }, (_, i) => i);
+  const all = notBus(sec, Array.from({ length: sec.count }, (_, i) => i));
   if (!turns || turns.every((t) => t === 'none')) return all;
   const marked = all.filter((i) => turns[i] !== 'none');
   return marked.length ? marked : all;
+}
+
+/** Can the car move from lane `a` to lane `b` on this section? (OSM change:lanes: no / not_left / not_right) */
+export function changeAllowed(sec: Section, a: number, b: number): boolean {
+  const ch = sec.forward ? sec.rec.cf : sec.rec.cb;
+  if (!ch) return true;
+  const step = b > a ? 1 : -1;
+  for (let i = a; i !== b; i += step) {
+    const v = ch[i] || 'yes';
+    if (v === 'no' || (step > 0 && v === 'not_right') || (step < 0 && v === 'not_left')) return false;
+  }
+  return true;
 }
 
 /** The lane to cruise in when nothing constrains: the right-hand through lane (keep right), never a turn-only or unmarked lane. */
@@ -86,7 +115,15 @@ function preferredLane(sec: Section): number {
 }
 
 /** Where the car lands on the next section after a manoeuvre, given its lane before it. */
-function landingLane(m: Maneuver, from: Section, lane: number, to: Section): number {
+function landingLane(m: Maneuver | null, from: Section, lane: number, to: Section): number {
+  const cn = connection(from, to);
+  if (cn && cn.m.length) {
+    const hit = cn.m.find(([a]) => a === lane);
+    if (hit) return Math.min(to.count - 1, hit[1]);
+    const nearest = cn.m.reduce((best, pair) => (Math.abs(pair[0] - lane) < Math.abs(best[0] - lane) ? pair : best), cn.m[0]);
+    return Math.min(to.count - 1, nearest[1]);
+  }
+  if (!m) return to.count === from.count ? lane : Math.max(0, Math.min(to.count - 1, Math.round((lane * (to.count - 1)) / Math.max(1, from.count - 1))));
   if (/left/.test(m.type) || m.type === 'uturn') return 0;
   if (/right/.test(m.type)) return to.count - 1;
   if (from.count === to.count) return lane;
@@ -119,7 +156,7 @@ export function planLanes(sections: Section[], cum: number[], maneuvers: Maneuve
     const s = approach(m);
     if (mFor[s] < 0) mFor[s] = mi; // the first manoeuvre on a section is the one to prepare for
   });
-  const allowedOf = sections.map((sec, s) => (mFor[s] >= 0 ? allowedLanes(maneuvers[mFor[s]], sec) : null));
+  const allowedOf = sections.map((sec, s) => (mFor[s] >= 0 ? allowedLanes(maneuvers[mFor[s]], sec, sections[s + 1]) : null));
   let lane = startLane;
   for (let s = 0; s < sections.length; s++) {
     const sec = sections[s];
@@ -147,14 +184,13 @@ export function planLanes(sections: Section[], cum: number[], maneuvers: Maneuve
       const vms = planSpeed(sec) / 3.6;
       const lead = Math.max(LANE_LEAD_MIN, LANE_LEAD_S * vms) * Math.max(1, toCross);
       mustBeInBy = m.at - lead;
+      // a solid line on this section forbids the change: be in the lane before the section starts
+      if (toCross && !changeAllowed(sec, lane, recommended)) mustBeInBy = Math.min(mustBeInBy, cum[sec.i0]);
     }
     steps.push({ section: s, allowed, recommended, mustBeInBy, maneuver: mi });
     // carry the lane into the next section
     const next = sections[s + 1];
-    if (next) {
-      if (m && m.at <= cum[next.i0] + 1) lane = landingLane(m, sec, recommended, next);
-      else lane = next.count === sec.count ? recommended : Math.round((recommended * (next.count - 1)) / Math.max(1, sec.count - 1));
-    }
+    if (next) lane = landingLane(m && m.at <= cum[next.i0] + 1 ? m : null, sec, recommended, next);
   }
   return steps;
 }

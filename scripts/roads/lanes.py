@@ -37,6 +37,7 @@ frame) or null, ms/mb speed limits, rb roundabout, cs/ce junction cut-back at st
 import json
 import math
 import os
+import re
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -313,6 +314,29 @@ def layout(tags):
         tf = None
     if tb and len(tb) != b:
         tb = None
+    def per_lane(key, n_dir, both_key=None):
+        v = tags.get(key)
+        if not v and both_key:
+            v = tags.get(both_key)
+        if not v:
+            return None
+        arr = [x.strip() for x in v.split('|')]
+        return arr if len(arr) == n_dir else None
+    cf = per_lane('change:lanes:forward', f, 'change:lanes' if (oneway or b == 0) else None)
+    cb = per_lane('change:lanes:backward', b)
+
+    def bus_lanes(n_dir, suffix):
+        arr = per_lane(f'bus:lanes{suffix}', n_dir, 'bus:lanes' if (oneway or b == 0) and suffix else None) or \
+              per_lane(f'psv:lanes{suffix}', n_dir, 'psv:lanes' if (oneway or b == 0) and suffix else None)
+        if arr:
+            flags = [1 if x == 'designated' else 0 for x in arr]
+            return flags if any(flags) else None
+        cnt = to_int(tags.get(f'lanes:bus{suffix}') or tags.get(f'lanes:psv{suffix}') or (tags.get('lanes:bus') if suffix == ':forward' and (oneway or b == 0) else None))
+        if cnt and 0 < cnt < n_dir:
+            return [0] * (n_dir - cnt) + [1] * cnt   # position unknown: assume the kerb-side lanes
+        return None
+    bf = bus_lanes(f, ':forward') if f else None
+    bb = bus_lanes(b, ':backward') if b else None
     ms = speed(tags.get('maxspeed:forward') or tags.get('maxspeed'))
     mb = speed(tags.get('maxspeed:backward') or tags.get('maxspeed'))
     layer = to_int(tags.get('layer'), 0) or 0
@@ -323,7 +347,7 @@ def layout(tags):
     if tunnel and layer >= 0:
         layer = -1
     return dict(c=cls, link=link, rb=rb, o=oneway, rev=reversed_, f=f, b=b, lw=round(lw, 3), l=round(left, 3), W=W,
-                tf=tf, tb=tb, ms=ms, mb=mb, ly=layer, br=bridge, tu=tunnel)
+                tf=tf, tb=tb, cf=cf, cb=cb, bf=bf, bb=bb, ms=ms, mb=mb, ly=layer, br=bridge, tu=tunnel)
 
 
 # ───────────────────────── model ─────────────────────────
@@ -472,6 +496,7 @@ def build(raw):
             if k in crossings:
                 p.crossings.append(along_of(p, ll))
     solve_heights(parts, ends)
+    connectivity(parts, ends)
     return parts, ends, signals
 
 
@@ -753,6 +778,83 @@ def emit_structure(p, rec, add):
             pier_next += PIER_EVERY
 
 
+# ───────────────────────── junction lane connectivity ─────────────────────────
+CONNECT = {}   # (part id, forward travel) -> [{to, t, m: [[fromLane, toLane], ...]}]
+
+
+def turn_class(h_in, h_out):
+    """Turn from arriving direction h_in to leaving direction h_out (unit vectors): through/left/right/uturn."""
+    cross = h_in[0] * h_out[1] - h_in[1] * h_out[0]
+    dot = max(-1.0, min(1.0, h_in[0] * h_out[0] + h_in[1] * h_out[1]))
+    ang = math.degrees(math.acos(dot))
+    if ang < 30:
+        return 'through'
+    if ang > 150:
+        return 'uturn'
+    return 'left' if cross > 0 else 'right'   # y up, x east: positive cross = anticlockwise = left
+
+
+def lane_map(turns_in, n_in, n_out, t):
+    """Which incoming lanes feed the turn, and where they land: [[from, to], ...]."""
+    if turns_in:
+        want = {'left': r'left|reverse', 'uturn': r'reverse|left', 'right': r'right', 'through': r'through|none|^$'}[t]
+        src = [i for i, x in enumerate(turns_in) if re.search(want, x)]
+        if not src and t == 'through':
+            src = [i for i, x in enumerate(turns_in) if 'slight' in x]
+    else:
+        src = []
+    if not src:
+        src = [0] if t in ('left', 'uturn') else [n_in - 1] if t == 'right' else list(range(n_in))
+    out = []
+    if t in ('left', 'uturn'):
+        for k, i in enumerate(src):
+            out.append([i, min(n_out - 1, k)])
+    elif t == 'right':
+        for k, i in enumerate(reversed(src)):
+            out.append([i, max(0, n_out - 1 - k)])
+    else:
+        if len(src) == n_out:
+            out = [[i, k] for k, i in enumerate(src)]
+        else:
+            for k, i in enumerate(src):
+                out.append([i, max(0, min(n_out - 1, round(k * (n_out - 1) / max(1, len(src) - 1))))])
+    return out
+
+
+def connectivity(parts, ends):
+    """For every junction, how the lanes of each arriving road connect to each road it can leave by."""
+    for node, lst in ends.items():
+        if len(lst) < 2:
+            continue
+        arrivals, departures = [], []
+        for p, at_end in lst:
+            m = p.m
+            away = (m[-2][0] - m[-1][0], m[-2][1] - m[-1][1]) if at_end else (m[1][0] - m[0][0], m[1][1] - m[0][1])
+            L = math.hypot(*away) or 1.0
+            away = (away[0] / L, away[1] / L)
+            lay = p.lay
+            # travel arriving at the node: forward lanes if the part ends here, backward lanes if it starts here
+            if at_end and lay['f']:
+                arrivals.append((p, True, lay['f'], lay['tf'], (-away[0], -away[1])))
+            if not at_end and lay['b']:
+                arrivals.append((p, False, lay['b'], lay['tb'], (-away[0], -away[1])))
+            if not at_end and lay['f']:
+                departures.append((p, True, lay['f'], away))
+            if at_end and lay['b']:
+                departures.append((p, False, lay['b'], away))
+        for p, fwd, n_in, turns_in, h_in in arrivals:
+            entries = []
+            for q, qfwd, n_out, h_out in departures:
+                if q is p:
+                    continue
+                if n_in < 2 and n_out < 2:
+                    continue
+                t = turn_class(h_in, h_out)
+                entries.append({'to': q.id, 'd': 'f' if qfwd else 'b', 't': t, 'm': lane_map(turns_in, n_in, n_out, t)})
+            if entries:
+                CONNECT[(p.id, fwd)] = entries
+
+
 # ───────────────────────── features ─────────────────────────
 def emit(parts, ends, signals):
     feats = defaultdict(dict)   # tile -> {kind: [features]}
@@ -784,6 +886,15 @@ def emit(parts, ends, signals):
         rec = {'id': p.id, 'c': lay['c'] + ('_link' if lay['link'] else ''), 'g': p.ll, 'lw': lw, 'l': left, 'f': lay['f'], 'b': lay['b'],
                'o': 1 if lay['o'] else 0, 'tf': lay['tf'], 'tb': lay['tb'], 'br': 1 if lay['br'] else 0, 'tu': 1 if lay['tu'] else 0,
                'ly': lay['ly'], 'ms': lay['ms'], 'mb': lay['mb'], 'rb': 1 if lay['rb'] else 0, 'cs': round(p.cs, 1), 'ce': round(p.ce, 1)}
+        for k in ('cf', 'cb', 'bf', 'bb'):
+            if lay.get(k):
+                rec[k] = lay[k]
+        cn = CONNECT.get((p.id, True))
+        if cn:
+            rec['cn'] = cn
+        cnb = CONNECT.get((p.id, False))
+        if cnb:
+            rec['cnb'] = cnb
         elevated = max(p.h) > 0.3
         if elevated:
             # heights along g (same vertices as m, which was de-duplicated from ll: map by nearest cum)
