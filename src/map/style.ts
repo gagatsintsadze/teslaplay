@@ -12,7 +12,7 @@ const GLYPHS = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';
 const SRC = 'omt';
 
 /** Pixels per metre at zoom 0 for Georgia's latitude (≈41.7°): 2^z / (156543 · cos φ). */
-const PX_PER_M_Z0 = 1 / 116860;
+const PX_PER_M_Z0 = 1 / 58440;
 
 export interface Palette {
   land: string; residential: string; park: string; wood: string; water: string; sand: string;
@@ -44,7 +44,7 @@ export const PALETTES: Record<'light' | 'dark', Palette> = {
  * exact asphalt on top of these at z15.3+, so they only need to be a plausible underlay (and the look
  * where no lane data exists). Motorways/trunks are mapped per carriageway in OSM.
  */
-const ROAD_W: Record<string, number> = { motorway: 12, trunk: 11, primary: 10, secondary: 9, tertiary: 8, minor: 6.5, service: 4, track: 3 };
+const ROAD_W: Record<string, number> = { motorway: 7, trunk: 6.5, primary: 6, secondary: 5, tertiary: 4.5, minor: 3.5, service: 2.2, track: 1.6 };
 const RANK: Record<string, number> = { service: 1, track: 1, minor: 2, tertiary: 3, secondary: 4, primary: 5, trunk: 6, motorway: 7 };
 const ROAD_CLASSES = Object.keys(ROAD_W);
 

@@ -12,7 +12,7 @@ import { PALETTES } from './style';
  * markings at z16.3, painted arrows at z16.8. Bridge parapets and tunnel portals are real 3-D.
  */
 
-export const PX_PER_M_Z0 = 1 / 116860; // pixels per metre at zoom 0 around 41.7°N (Georgia)
+export const PX_PER_M_Z0 = 1 / 58440; // pixels per metre at zoom 0 around 41.7°N (Georgia): 512 px world ÷ (40 075 km · cos φ)
 
 /** Pixels for `m` metres at every zoom (an expression per feature is fine), never below `minPx`. */
 export function metres(m: any, minPx = 0): any {

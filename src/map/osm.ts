@@ -54,9 +54,9 @@ const ROUTE_LAYERS: { id: string; role: string; part: 'casing' | 'fill' }[] = [
 ];
 
 /** Road widths in the style's units (see style.ts ROAD_W) by Mapbox Traffic `class`. */
-const TRAFFIC_UNITS: any = ['match', ['get', 'class'], ['motorway', 'motorway_link'], 22, ['trunk', 'trunk_link'], 20, ['primary', 'primary_link'], 16, 'secondary', 13, 'tertiary', 10.5, 'service', 5, 8];
+const TRAFFIC_UNITS: any = ['match', ['get', 'class'], ['motorway', 'motorway_link'], 11, ['trunk', 'trunk_link'], 10, ['primary', 'primary_link'], 8, 'secondary', 6.5, 'tertiary', 5.2, 'service', 2.5, 4];
 const byZoom = (k: number, minPx: number): any => ['interpolate', ['exponential', 2], ['zoom'],
-  11, minPx, 16, ['max', minPx, ['*', TRAFFIC_UNITS, (k * 2 ** 16) / 116860]], 20, ['max', minPx, ['*', TRAFFIC_UNITS, (k * 2 ** 20) / 116860]]];
+  11, minPx, 16, ['max', minPx, ['*', TRAFFIC_UNITS, (k * 2 ** 16) / 58440]], 20, ['max', minPx, ['*', TRAFFIC_UNITS, (k * 2 ** 20) / 58440]]];
 const TRAFFIC_REFRESH = 8 * 60e3; // Mapbox updates congestion about every 8 minutes
 const TRAFFIC_SCHEME = 'tp-traffic';
 let trafficProtocol = false;
@@ -215,11 +215,11 @@ export class OsmEngine implements MapEngine {
     // Maneuver arrow (white, above the buildings so it is always readable).
     if (!map.getSource('tp-mv')) {
       map.addSource('tp-mv', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-      const w = (m: number, minPx: number) => ['interpolate', ['exponential', 2], ['zoom'], 14, minPx, 20, Math.max(minPx, m * 2 ** 20 / 116860)];
-      map.addLayer({ id: 'tp-mv-casing', type: 'line', source: 'tp-mv', filter: ['==', ['geometry-type'], 'LineString'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#0b4fc4', 'line-width': w(6.2, 12) } });
-      map.addLayer({ id: 'tp-mv-line', type: 'line', source: 'tp-mv', filter: ['==', ['geometry-type'], 'LineString'], layout: { 'line-cap': 'butt', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': w(4.2, 8) } });
+      const w = (m: number, minPx: number) => ['interpolate', ['exponential', 2], ['zoom'], 14, minPx, 20, Math.max(minPx, m * 2 ** 20 / 58440)];
+      map.addLayer({ id: 'tp-mv-casing', type: 'line', source: 'tp-mv', filter: ['==', ['geometry-type'], 'LineString'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#0b4fc4', 'line-width': w(3.1, 12) } });
+      map.addLayer({ id: 'tp-mv-line', type: 'line', source: 'tp-mv', filter: ['==', ['geometry-type'], 'LineString'], layout: { 'line-cap': 'butt', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': w(2.1, 8) } });
       // Arrow head: a real triangle on the ground (no font glyph needed).
-      map.addLayer({ id: 'tp-mv-head-casing', type: 'line', source: 'tp-mv', filter: ['==', ['geometry-type'], 'Polygon'], layout: { 'line-join': 'round' }, paint: { 'line-color': '#0b4fc4', 'line-width': w(1, 2.5) } });
+      map.addLayer({ id: 'tp-mv-head-casing', type: 'line', source: 'tp-mv', filter: ['==', ['geometry-type'], 'Polygon'], layout: { 'line-join': 'round' }, paint: { 'line-color': '#0b4fc4', 'line-width': w(0.5, 2.5) } });
       map.addLayer({ id: 'tp-mv-head', type: 'fill', source: 'tp-mv', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#ffffff' } });
     }
     addRoadLayers(map, this.theme);

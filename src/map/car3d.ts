@@ -1,4 +1,5 @@
 import type { LngLat } from '../types';
+import { PX_PER_M_Z0 } from './roadlayers';
 
 /**
  * A 3-D car on the map: a MapLibre custom layer that draws a glTF binary (.glb) at the car's
@@ -269,9 +270,9 @@ export class CarLayer {
     if (!this.ready || !this.visible || !this.pos || !this.prog) return;
     const mc = this.maplibre.MercatorCoordinate.fromLngLat({ lng: this.pos[0], lat: this.pos[1] }, 0);
     const mPerUnit = mc.meterInMercatorCoordinateUnits();
-    // Nav apps draw the car bigger than life so it reads at any zoom: at least ~64 px long.
-    const pxPerM = (2 ** this.map.getZoom()) / 116860;
-    const scale = mPerUnit * Math.max(1, 64 / ((this.opts.length || 4.7) * pxPerM));
+    // Nav apps draw the car a little bigger than life so it reads at any zoom: at least ~48 px long.
+    const pxPerM = (2 ** this.map.getZoom()) * PX_PER_M_Z0;
+    const scale = mPerUnit * Math.max(1, 48 / ((this.opts.length || 4.7) * pxPerM));
     const h = (this.heading * Math.PI) / 180;
     // World frame of the model: x east, y north, z up. Mercator: x east, y SOUTH, z up.
     const fx = Math.sin(h), fy = -Math.cos(h);          // forward in mercator
