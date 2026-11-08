@@ -1,6 +1,7 @@
 import type { RoadScene } from '../services/roads';
 import { signalImage } from './arrows';
 import { PALETTES } from './style';
+import { MeshLayer, type Strip } from './mesh3d';
 
 /**
  * MapLibre layers for the pre-built lane model (services/roads.ts, built by scripts/roads/lanes.py).
@@ -42,6 +43,7 @@ function dashM(dash: number, gap: number, wM: number, minPx: number): any {
 
 export function addRoadLayers(map: any, theme: 'light' | 'dark') {
   if (map.getSource('tp-surf')) return;
+  mesh = null;
   const P = PALETTES[theme];
   const empty = { type: 'FeatureCollection', features: [] };
   for (const id of ROAD_SOURCES) map.addSource(id, { type: 'geojson', data: empty, tolerance: 0.15 });
@@ -134,9 +136,28 @@ export function setXray(map: any, ids: string[]) {
   if (!map.getLayer('tp-ex-xray')) return;
   map.setFilter('tp-ex', ['!', ['in', ['get', 's'], ['literal', ids]]]);
   map.setFilter('tp-ex-xray', ['in', ['get', 's'], ['literal', ids]]);
+  if (mesh) mesh.setXray(ids);
 }
 
-export function setRoadScene(map: any, scene: RoadScene) {
+let mesh: MeshLayer | null = null;
+const hex = (c: string): [number, number, number] => { const n = parseInt(c.replace('#', ''), 16); return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]; };
+
+/** The smooth 3-D strips of the scene → the mesh layer (created on first use, under the buildings). */
+function setStrips(map: any, maplibre: any, theme: 'light' | 'dark', items: any[]) {
+  if (!mesh || !map.getLayer(mesh.id)) {
+    mesh = new MeshLayer('tp-m3', maplibre, map);
+    map.addLayer(mesh, map.getLayer('tp-buildings') ? 'tp-buildings' : undefined);
+  }
+  const P = PALETTES[theme];
+  const major = new Set(['motorway', 'trunk', 'primary', 'secondary', 'motorway_link', 'trunk_link', 'primary_link', 'secondary_link']);
+  const strips: Strip[] = items.map((f) => ({
+    id: f.id, s: f.s, pts: f.q,
+    color: hex(f.k === 'dmk' ? P.marking : f.k === 'rail' ? P.bridgeKerb : major.has(f.c) ? P.asphalt : P.asphaltMinor),
+  }));
+  mesh.setStrips(strips);
+}
+
+export function setRoadScene(map: any, scene: RoadScene, maplibre?: any, theme: 'light' | 'dark' = 'dark') {
   const set = (id: string, data: any) => { const s = map.getSource(id); if (s) s.setData(data); };
   set('tp-surf', scene.surf);
   set('tp-jn', scene.jn);
@@ -144,5 +165,6 @@ export function setRoadScene(map: any, scene: RoadScene) {
   set('tp-ar', scene.ar);
   set('tp-ex', scene.ex);
   set('tp-sh', scene.sh);
+  if (maplibre) setStrips(map, maplibre, theme, scene.m3 || []);
   set('tp-sig', scene.sig);
 }

@@ -474,7 +474,7 @@ def along_of(p, ll):
 LEVEL_H = 6.0      # metres per OSM layer: ~5 m clearance + a 1 m deck
 GRADE = 0.06       # approach ramps climb at 6 %
 DECK_T = 0.9       # deck slab thickness
-SLICE = 8.0        # ramps are emitted as slabs this long (≤ 0.5 m step at 6 %)
+SLICE = 6.0        # the deck body under the smooth top is sliced this long on ramps
 PIER_EVERY = 28.0
 
 
@@ -588,8 +588,57 @@ def rect(fr, q, u, along0, along1, off0, off1):
     return [pt(along0, off0), pt(along1, off0), pt(along1, off1), pt(along0, off1), pt(along0, off0)]
 
 
+def strip_pts(p, s0, s1, step):
+    """Sample distances along p between s0 and s1: every `step` metres plus the part's own vertices."""
+    out = {round(s0, 3), round(s1, 3)}
+    s = s0 + step
+    while s < s1 - 0.3:
+        out.add(round(s, 3))
+        s += step
+    for c in p.cum:
+        if s0 + 0.3 < c < s1 - 0.3:
+            out.add(round(c, 3))
+    return sorted(out)
+
+
+def samples(p, s0, s1, step):
+    """[(s, q, n)] along p: point and mitred unit normal (right of travel, scaled so offsets keep their width)."""
+    ss = strip_pts(p, s0, s1, step)
+    pts = [point_at(p.m, sd)[0] for sd in ss]
+    out = []
+    for i, sd in enumerate(ss):
+        a = pts[max(0, i - 1)]
+        b = pts[min(len(pts) - 1, i + 1)]
+        if i == 0:
+            d = (pts[1][0] - pts[0][0], pts[1][1] - pts[0][1])
+        elif i == len(pts) - 1:
+            d = (pts[-1][0] - pts[-2][0], pts[-1][1] - pts[-2][1])
+        else:
+            d1 = (pts[i][0] - a[0], pts[i][1] - a[1])
+            d2 = (b[0] - pts[i][0], b[1] - pts[i][1])
+            l1 = math.hypot(*d1) or 1.0
+            l2 = math.hypot(*d2) or 1.0
+            d = (d1[0] / l1 + d2[0] / l2, d1[1] / l1 + d2[1] / l2)
+            # mitre: the bisector normal must be scaled by 1/cos(θ/2) = 2/|d1̂+d2̂| … capped
+            L = math.hypot(*d)
+            if L < 1e-6:
+                d = d1
+            else:
+                k = min(3.0, 2.0 / L)
+                n = (d[1] / L * k, -d[0] / L * k)
+                out.append((sd, pts[i], n))
+                continue
+        L = math.hypot(*d) or 1.0
+        out.append((sd, pts[i], (d[1] / L, -d[0] / L)))
+    return out
+
+
 def emit_structure(p, rec, add):
-    """An elevated road part as 3-D slabs: deck, lane surface, markings, parapets, piers, shadow."""
+    """
+    An elevated road part. The sloped surfaces — deck top, lane markings, parapets — are emitted as
+    3-D triangle strips with a height per vertex ('m3'), so ramps are smooth; the deck body under
+    them, the piers and the shadow are fill-extrusion slabs/fills (flat tops, sliced on ramps).
+    """
     lay = p.lay
     fr = p.frame
     N = lay['f'] + lay['b']
@@ -597,57 +646,87 @@ def emit_structure(p, rec, add):
     right = left + N * lw
     sid = p.id
     cls = rec['c']
+    s0, s1 = p.cs, p.L - p.ce
+    if s1 - s0 < 1.0:
+        return
+
+    def vtx(sm, off, dz):
+        sd, q, n = sm
+        ll = fr.to_ll((q[0] + n[0] * off, q[1] + n[1] * off))
+        return [ll[0], ll[1], round(h_at(p, sd) + dz, 2)]
+
+    def ribbon3(sa, sb, off_a, off_b, dz, step=4.0):
+        pts = []
+        for sm in samples(p, sa, sb, step):
+            pts.append(vtx(sm, off_a, dz))
+            pts.append(vtx(sm, off_b, dz))
+        return pts
+
+    def wall3(sa, sb, off, dz0, dz1, step=4.0):
+        pts = []
+        for sm in samples(p, sa, sb, step):
+            pts.append(vtx(sm, off, dz0))
+            pts.append(vtx(sm, off, dz1))
+        return pts
+
+    def m3(kid, kind, pts, extra=None):
+        f = {'id': f'{sid}{kid}', 'k': kind, 'q': pts, 's': sid}
+        if extra:
+            f.update(extra)
+        add('m3', f, [[x[0], x[1]] for x in pts])
+
+    # deck top (asphalt) and its markings, smooth
+    m3('t', 'deck', ribbon3(s0, s1, left - 0.45, right + 0.45, 0.0), {'c': cls})
+    ms0, ms1 = s0 + 0.2, s1 - 0.2
+    if ms1 - ms0 > 1:
+        for off in (left + EDGE_IN, right - EDGE_IN):
+            m3(f'e{"L" if off < 0 else "R"}', 'dmk', ribbon3(ms0, ms1, off - 0.08, off + 0.08, 0.12))
+        for i in range(1, N):
+            off = left + i * lw
+            centre = lay['b'] and i == lay['b']
+            if centre and not (lay['f'] == 1 and lay['b'] == 1):
+                for o in (off - 0.15, off + 0.15):
+                    m3(f'c{i}{int(o * 10)}', 'dmk', ribbon3(ms0, ms1, o - 0.08, o + 0.08, 0.12))
+                continue
+            dash, gap = (3.0, 6.0) if centre else (3.0, 9.0)
+            a = ms0 - (ms0 % (dash + gap))
+            while a < ms1:
+                d0, d1 = max(a, ms0), min(a + dash, ms1)
+                if d1 - d0 > 0.4:
+                    m3(f'm{i}{int(a)}', 'dmk', ribbon3(d0, d1, off - 0.08, off + 0.08, 0.12, step=8.0))
+                a += dash + gap
+    # parapets: vertical walls where the deck is up, with a thin cap
+    rs = [sd for sd in strip_pts(p, s0, s1, 4.0) if h_at(p, sd) >= 1.0]
+    if len(rs) >= 2:
+        ra, rb = rs[0], rs[-1]
+        for off in (left - 0.3, right + 0.3):
+            tag = "L" if off < 0 else "R"
+            m3(f'r{tag}', 'rail', wall3(ra, rb, off - 0.15, 0.0, 1.0) if off < 0 else wall3(ra, rb, off + 0.15, 0.0, 1.0))
+            m3(f'rc{tag}', 'rail', ribbon3(ra, rb, off - 0.15, off + 0.15, 1.0))
+    # deck body (sides) as slabs under the top, piers, shadow
     pier_next = PIER_EVERY / 2
-    for k, (s0, s1) in enumerate(slices(p)):
-        h = max(0.12, (h_at(p, s0) + h_at(p, s1)) / 2)
-        seg = sub(p.m, s0, s1)
+    for k, (a, b) in enumerate(slices(p)):
+        ha, hb = h_at(p, a), h_at(p, b)
+        h = min(ha, hb)
+        seg = sub(p.m, a, b)
         if seg is None:
             continue
-        base = max(0.0, h - DECK_T)
-        top = round(h, 2)
-        deck = [fr.to_ll(q) for q in ribbon(seg, left - 0.45, right + 0.45)]
-        add('ex', {'id': f'{sid}d{k}', 'g': deck, 'b': round(base, 2), 'h': top, 'k': 'deck', 's': sid, 'c': cls}, deck)
-        # markings as thin slabs on the deck top
-        mk = sub(p.m, s0 + 0.2, s1 - 0.2)
-        if mk is not None and h > 0.3:
-            mb, mh = round(h + 0.03, 2), round(h + 0.08, 2)
-            for off in (left + EDGE_IN, right - EDGE_IN):
-                ring = [fr.to_ll(q) for q in ribbon(mk, off - 0.08, off + 0.08)]
-                add('ex', {'id': f'{sid}e{k}{"L" if off < 0 else "R"}', 'g': ring, 'b': mb, 'h': mh, 'k': 'dmk', 's': sid}, ring)
-            for i in range(1, N):
-                off = left + i * lw
-                centre = lay['b'] and i == lay['b']
-                if centre and not (lay['f'] == 1 and lay['b'] == 1):
-                    for o in (off - 0.15, off + 0.15):
-                        ring = [fr.to_ll(q) for q in ribbon(mk, o - 0.08, o + 0.08)]
-                        add('ex', {'id': f'{sid}c{k}{i}{int(o * 10)}', 'g': ring, 'b': mb, 'h': mh, 'k': 'dmk', 's': sid}, ring)
-                    continue
-                dash, gap = (3.0, 6.0) if centre else (3.0, 9.0)
-                a = s0 + 0.2 - ((s0 + 0.2) % (dash + gap))   # phase continues across slices
-                while a < s1 - 0.2:
-                    d0, d1 = max(a, s0 + 0.2), min(a + dash, s1 - 0.2)
-                    if d1 - d0 > 0.4:
-                        q, u = point_at(p.m, d0)
-                        ring = rect(fr, q, u, 0, d1 - d0, off - 0.08, off + 0.08)
-                        add('ex', {'id': f'{sid}m{k}{i}{int(a)}', 'g': ring, 'b': mb, 'h': mh, 'k': 'dmk', 's': sid}, ring)
-                    a += dash + gap
-        # parapets
-        if h >= 1.0:
-            for off in (left - 0.3, right + 0.3):
-                ring = [fr.to_ll(q) for q in ribbon(seg, off - 0.15, off + 0.15)]
-                add('ex', {'id': f'{sid}r{k}{"L" if off < 0 else "R"}', 'g': ring, 'b': top, 'h': round(h + 1.0, 2), 'k': 'rail', 's': sid}, ring)
-        # shadow on the ground, cast to the south-east
-        if h >= 1.0:
-            dx, dy = 0.45 * h, -0.35 * h
+        top = max(0.1, h - 0.35)
+        base = max(0.0, max(ha, hb) - DECK_T)
+        if top > base + 0.05:
+            deck = [fr.to_ll(q) for q in ribbon(seg, left - 0.45, right + 0.45)]
+            add('ex', {'id': f'{sid}d{k}', 'g': deck, 'b': round(base, 2), 'h': round(top, 2), 'k': 'deck', 's': sid, 'c': cls}, deck)
+        hm = (ha + hb) / 2
+        if hm >= 1.0:
+            dx, dy = 0.45 * hm, -0.35 * hm
             sh = [fr.to_ll((q[0] + dx, q[1] + dy)) for q in ribbon(seg, left - 0.6, right + 0.6)]
             add('sh', {'id': f'{sid}s{k}', 'g': sh, 's': sid}, sh)
-        # piers
-        while pier_next < s1:
-            if pier_next >= s0 and h >= 3.5:
+        while pier_next < b:
+            if pier_next >= a and hm >= 3.5:
                 q, u = point_at(p.m, pier_next)
                 half = min(2.2, (right - left) * 0.3)
                 ring = rect(fr, q, u, -0.8, 0.8, (left + right) / 2 - half, (left + right) / 2 + half)
-                add('ex', {'id': f'{sid}p{int(pier_next)}', 'g': ring, 'b': 0, 'h': round(base, 2), 'k': 'pier', 's': sid}, ring)
+                add('ex', {'id': f'{sid}p{int(pier_next)}', 'g': ring, 'b': 0, 'h': round(max(0.0, h_at(p, pier_next) - DECK_T), 2), 'k': 'pier', 's': sid}, ring)
             pier_next += PIER_EVERY
 
 
@@ -823,8 +902,11 @@ def emit(parts, ends, signals):
 
 
 def guides(node, lst, add):
-    """Dashed guide lines (line 1.7) carrying the lane dividers of a road straight across the junction
-    to the continuing road, so wide junctions still show where the lanes go."""
+    """
+    Lines across a junction between a road and its straight continuation: same-direction lane
+    dividers continue as dotted guide lines (line 1.7), the centre line continues as itself, and
+    the kerb-side edge line continues on the side where no road joins (a T-junction's far side).
+    """
     ends = []
     for p, at_end in lst:
         m = p.m
@@ -833,39 +915,55 @@ def guides(node, lst, add):
         u = (u[0] / L, u[1] / L)                      # pointing away from the node
         lay = p.lay
         N = lay['f'] + lay['b']
-        # same-direction dividers only, as offsets in the "away" frame (right of `u` positive)
-        divs = []
+        sgn = -1 if at_end else 1                     # way-frame offset → "away" frame
+        lines = []                                    # (kind, away-offset)
         for i in range(1, N):
-            if lay['b'] and i == lay['b']:
-                continue
             off = lay['l'] + i * lay['lw']
-            divs.append(off if not at_end else -off)
+            if lay['b'] and i == lay['b']:
+                if lay['f'] == 1 and lay['b'] == 1:
+                    lines.append(('cl1', off * sgn))
+                else:
+                    lines.append(('cl2', (off - 0.15) * sgn))
+                    lines.append(('cl2', (off + 0.15) * sgn))
+            else:
+                lines.append(('guide', off * sgn))
+        lines.append(('edge', (lay['l'] + EDGE_IN) * sgn))
+        lines.append(('edge', (lay['l'] + N * lay['lw'] - EDGE_IN) * sgn))
         s = (p.L - p.ce) if at_end else p.cs
         q, d = point_at(m, s)
-        ends.append((p, at_end, u, divs, q, N, lay['lw']))
+        ends.append((p, at_end, u, lines, q, h_at(p, s)))
     for a in range(len(ends)):
         for b in range(a + 1, len(ends)):
-            pa, ea, ua, da, qa, Na, lwa = ends[a]
-            pb, eb, ub, db, qb, Nb, lwb = ends[b]
+            pa, ea, ua, la, qa, ha = ends[a]
+            pb, eb, ub, lb, qb, hb = ends[b]
             dot = ua[0] * ub[0] + ua[1] * ub[1]
-            if dot > -0.85 or Na != Nb or abs(lwa - lwb) > 0.3 or not da:
-                continue  # only straight continuations with the same lane layout
+            if dot > -0.8 or abs(ha - hb) > 0.3 or ha > 0.3:
+                continue  # only straight continuations, on the ground
             na = (ua[1], -ua[0])
             nb = (ub[1], -ub[0])
             gap = math.hypot(qa[0] - qb[0], qa[1] - qb[1])
-            if gap < 3.0 or gap > 80:
+            if gap < 2.0 or gap > 40:
                 continue
+            # which side of this through-road do the other roads join? (positive = right of ua)
+            joined = {1: False, -1: False}
+            for c in range(len(ends)):
+                if c in (a, b):
+                    continue
+                uc = ends[c][2]
+                side = ua[0] * uc[1] - ua[1] * uc[0]
+                joined[1 if side < 0 else -1] = True
             fr = pa.frame
-            for k, off in enumerate(da):
-                # the matching divider on the other road sits at -off in its own away frame
-                match = [o for o in db if abs(o + off) < 0.3]
+            for k, (kind, off) in enumerate(la):
+                match = [o for kk, o in lb if kk == kind and abs(o + off) < 0.3]
                 if not match:
                     continue
+                if kind == 'edge' and joined[1 if off > 0 else -1]:
+                    continue   # roads join on this side: the kerb line is broken here
                 o2 = match[0]
                 p1 = (qa[0] + na[0] * off, qa[1] + na[1] * off)
                 p2 = (qb[0] + nb[0] * o2, qb[1] + nb[1] * o2)
                 pts = [fr.to_ll(p1), fr.to_ll(p2)]
-                add('mk', {'id': f'g{node[0]}_{node[1]}_{pa.id}_{k}', 'k': 'guide', 'g': pts, 'ly': pa.lay['ly'], 'br': 0}, pts)
+                add('mk', {'id': f'g{node[0]}_{node[1]}_{pa.id}_{k}', 'k': kind, 'g': pts, 'ly': pa.lay['ly'], 'br': 0}, pts)
 
 
 def stop(p, s, off_a, off_b, kind, add):

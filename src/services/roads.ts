@@ -57,7 +57,7 @@ export interface RoadTile {
   draw: Record<string, any[]>;
 }
 
-export interface RoadScene { surf: any; jn: any; mk: any; ar: any; ex: any; sh: any; sig: any }
+export interface RoadScene { surf: any; jn: any; mk: any; ar: any; ex: any; sh: any; sig: any; /** smooth 3-D strips (bridge tops, markings, parapets): {id, s, k, c, q:[[lon,lat,z]…]} */ m3: any[] }
 
 export const tileKey = (x: number, y: number) => `${DETAIL_Z}/${x}/${y}`;
 
@@ -160,14 +160,14 @@ export class RoadDetails {
 
   /** Everything drawable in these tiles, de-duplicated (a road crossing a tile edge is in both). */
   scene(keys: string[]): RoadScene {
-    const out: Record<string, any[]> = { surf: [], jn: [], mk: [], ar: [], ex: [], sh: [], sig: [] };
+    const out: Record<string, any[]> = { surf: [], jn: [], mk: [], ar: [], ex: [], sh: [], sig: [], m3: [] };
     const seen = new Set<string>();
     for (const k of keys) {
       const t = this.tiles.get(k);
       if (!t) continue;
       for (const kind of Object.keys(out)) {
         for (const f of t.draw[kind] || []) {
-          const id = `${kind}:${f.properties.id}`;
+          const id = `${kind}:${(f.properties || f).id}`;
           if (seen.has(id)) continue;
           seen.add(id);
           out[kind].push(f);
@@ -175,7 +175,7 @@ export class RoadDetails {
       }
     }
     const fc = (features: any[]) => ({ type: 'FeatureCollection', features });
-    return { surf: fc(out.surf), jn: fc(out.jn), mk: fc(out.mk), ar: fc(out.ar), ex: fc(out.ex), sh: fc(out.sh), sig: fc(out.sig) };
+    return { surf: fc(out.surf), jn: fc(out.jn), mk: fc(out.mk), ar: fc(out.ar), ex: fc(out.ex), sh: fc(out.sh), sig: fc(out.sig), m3: out.m3 };
   }
 
   /** Lane records in the tile under `p` (empty when it isn't loaded). */
@@ -249,7 +249,7 @@ export class RoadDetails {
 
 /** Tile JSON (see lanes.py) → lane records + GeoJSON features per kind. */
 export function parseTile(key: string, built: string, j: any): RoadTile {
-  const draw: Record<string, any[]> = { surf: [], jn: [], mk: [], ar: [], ex: [], sh: [], sig: [] };
+  const draw: Record<string, any[]> = { surf: [], jn: [], mk: [], ar: [], ex: [], sh: [], sig: [], m3: [] };
   const poly = (kind: string, props: (f: any) => any) => {
     for (const f of j[kind] || []) draw[kind].push({ type: 'Feature', properties: { id: f.id, ...props(f) }, geometry: { type: 'Polygon', coordinates: [f.g] } });
   };
@@ -257,6 +257,7 @@ export function parseTile(key: string, built: string, j: any): RoadTile {
   poly('jn', (f) => ({ ly: f.ly }));
   poly('ex', (f) => ({ k: f.k, b: f.b, h: f.h, s: f.s || f.id, c: f.c || '' }));
   poly('sh', (f) => ({ s: f.s }));
+  for (const f of j.m3 || []) draw.m3.push(f);
   for (const f of j.mk || []) draw.mk.push({ type: 'Feature', properties: { id: f.id, k: f.k, ly: f.ly, br: f.br }, geometry: { type: 'LineString', coordinates: f.g } });
   for (const f of j.ar || []) draw.ar.push({ type: 'Feature', properties: { id: f.id, icon: `ta:${f.a}`, rot: f.r }, geometry: { type: 'Point', coordinates: f.g } });
   for (const s of j.s || []) draw.sig.push({ type: 'Feature', properties: { id: `${s[0]},${s[1]}` }, geometry: { type: 'Point', coordinates: s } });

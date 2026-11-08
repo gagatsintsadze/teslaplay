@@ -1,4 +1,5 @@
 import type { LngLat } from '../types';
+import { withOrigin } from './mesh3d';
 
 /**
  * The route band where the road is elevated (bridges, flyovers, ramps): a ribbon mesh drawn at the
@@ -29,6 +30,7 @@ export class RouteBandLayer {
   private count = 0;
   private runs: BandRun[] = [];
   private dirty = false;
+  private origin = [0, 0, 0];
 
   constructor(private maplibre: any, private map: any) {}
 
@@ -64,6 +66,9 @@ export class RouteBandLayer {
     const gl = this.gl!;
     const verts: number[] = [];
     const MC = this.maplibre.MercatorCoordinate;
+    const first = this.runs.find((r) => r.coords.length);
+    if (first) { const c = MC.fromLngLat({ lng: first.coords[0][0], lat: first.coords[0][1] }, 0); this.origin = [c.x, c.y, 0]; }
+    const [ox, oy] = this.origin;
     for (const run of this.runs) {
       const n = run.coords.length;
       if (n < 2) continue;
@@ -78,8 +83,8 @@ export class RouteBandLayer {
         dx /= l; dy /= l;
         // normal to the left (mercator y points south, so "left of travel" is (dy, -dx) flipped)
         const nx = dy, ny = -dx;
-        left.push([pts[i].x + nx * half, pts[i].y + ny * half, pts[i].z]);
-        right.push([pts[i].x - nx * half, pts[i].y - ny * half, pts[i].z]);
+        left.push([pts[i].x - ox + nx * half, pts[i].y - oy + ny * half, pts[i].z]);
+        right.push([pts[i].x - ox - nx * half, pts[i].y - oy - ny * half, pts[i].z]);
       }
       const c = run.color;
       for (let i = 0; i < n - 1; i++) {
@@ -98,7 +103,7 @@ export class RouteBandLayer {
     if (this.dirty) this.build();
     if (!this.count) return;
     gl.useProgram(this.prog);
-    gl.uniformMatrix4fv(this.loc.uMvp, false, new Float32Array(matrix));
+    gl.uniformMatrix4fv(this.loc.uMvp, false, new Float32Array(withOrigin(matrix, this.origin)));
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
     gl.enableVertexAttribArray(this.loc.aPos); gl.vertexAttribPointer(this.loc.aPos, 3, gl.FLOAT, false, 24, 0);
     gl.enableVertexAttribArray(this.loc.aCol); gl.vertexAttribPointer(this.loc.aCol, 3, gl.FLOAT, false, 24, 12);

@@ -39,7 +39,7 @@ export function trafficOnLanes(features: { congestion: string; coords: LngLat[] 
     // lanes of this direction, in the way's frame (right of the reference line positive)
     const left = h.forward ? r.l + r.b * r.lw : r.l;
     const right = h.forward ? r.l + n * r.lw : r.l + r.b * r.lw;
-    const g = trim(r.g, r.cs, r.ce);
+    const g = r.g; // the whole section, junctions included, so the colour runs through the joints
     if (g.length < 2) continue;
     const a = offsetLine(g, g.map(() => left + 0.15));
     const b = offsetLine(g, g.map(() => right - 0.15));
@@ -71,7 +71,7 @@ function segDist(p: LngLat, a: LngLat, b: LngLat): number {
 }
 
 /** The part of a line between `cs` metres from its start and `ce` metres from its end. */
-function trim(g: LngLat[], cs: number, ce: number): LngLat[] {
+export function trim(g: LngLat[], cs: number, ce: number): LngLat[] {
   const cum = [0];
   for (let i = 1; i < g.length; i++) cum.push(cum[i - 1] + distance(g[i - 1], g[i]));
   const L = cum[cum.length - 1];

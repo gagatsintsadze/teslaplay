@@ -246,7 +246,7 @@ export class OsmEngine implements MapEngine {
       map.addLayer({ id: 'tp-mv-head', type: 'fill', source: 'tp-mv', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#ffffff' } });
     }
     addRoadLayers(map, this.theme);
-    if (this.scene) setRoadScene(map, this.scene);
+    if (this.scene) setRoadScene(map, this.scene, this.gl, this.theme);
     if (this.carWanted) this.applyCar();
     this.band = null;
     this.applyTraffic();
@@ -257,7 +257,7 @@ export class OsmEngine implements MapEngine {
   /** The lane model (services/roads.ts): asphalt, junctions, markings, arrows, parapets, portals, traffic lights. */
   setRoadDetails(scene: RoadScene) {
     this.scene = scene;
-    if (this.map && this.map.getSource('tp-surf')) setRoadScene(this.map, scene);
+    if (this.map && this.map.getSource('tp-surf')) setRoadScene(this.map, scene, this.gl, this.theme);
   }
 
   /** Mapbox Traffic v1: congestion lines on each side of the road, beneath the route and buildings. */
