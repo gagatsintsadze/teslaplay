@@ -1,6 +1,7 @@
 import { bearing, destination, normalize360, toRad } from '../core/geo';
 import type { LaneRecord, RoadDetails } from '../services/roads';
 import type { LngLat, Maneuver } from '../types';
+import { planLanes, type PlanStep, type Section } from './laneplan';
 
 /**
  * Puts the route on its lanes. The router (Mapbox) returns a line down the middle of the road;
@@ -19,10 +20,21 @@ import type { LngLat, Maneuver } from '../types';
  */
 
 const MATCH_M = 16;      // how far a route vertex may be from a reference line to count
-const LEAD_M = 180;      // start moving into the turn lanes this far before the manoeuvre
 const BLEND_M = 90;      // lane changes are spread over this distance
 
-export interface LanePlacement { coords: LngLat[]; widths: number[]; /** chosen lane per vertex (0 = leftmost of the direction of travel), -1 where unmatched */ lanes: number[]; /** lanes available in the direction of travel per vertex */ counts: number[]; /** road height above ground per vertex (bridges, ramps), metres */ heights: number[] }
+export interface LanePlacement {
+  coords: LngLat[]; widths: number[];
+  /** chosen lane per vertex (0 = leftmost of the direction of travel), -1 where unmatched */
+  lanes: number[];
+  /** lanes available in the direction of travel per vertex */
+  counts: number[];
+  /** road height above ground per vertex (bridges, ramps), metres */
+  heights: number[];
+  /** the lane plan (nav/laneplan.ts) and the route sections it refers to */
+  plan: PlanStep[]; sections: Section[];
+  /** plan step index per vertex, -1 where unmatched */
+  step: number[];
+}
 
 interface Match { rec: LaneRecord; forward: boolean; signed: number; d: number; /** height of the road at the matched point */ h: number }
 
@@ -38,27 +50,6 @@ function laneCentres(r: LaneRecord, forward: boolean): number[] {
 }
 
 const turnsOf = (r: LaneRecord, forward: boolean) => (forward ? r.tf : r.tb);
-
-/** The lane (index in the travel frame, leftmost = 0) to be in for this manoeuvre; null = the default lane. */
-function laneFor(m: Maneuver, rec: LaneRecord, forward: boolean): number | null {
-  const n = forward ? rec.f : rec.b;
-  if (n <= 1) return null;
-  const left = /left/.test(m.type) || m.type === 'uturn';
-  const right = /right/.test(m.type);
-  const pick = (idx: number[]) => (left ? Math.min(...idx) : right ? Math.max(...idx) : Math.max(...idx)); // straight on: stay as far right as allowed
-  if (m.lanes && m.lanes.length === n) {
-    const active = m.lanes.map((l, i) => (l.active ? i : -1)).filter((i) => i >= 0);
-    if (active.length) return pick(active);
-    const valid = m.lanes.map((l, i) => (l.valid ? i : -1)).filter((i) => i >= 0);
-    if (valid.length) return pick(valid);
-    return null;
-  }
-  const turns = turnsOf(rec, forward);
-  if (!turns) return left ? 0 : right ? n - 1 : null;
-  const want = left ? /left|reverse/ : right ? /right/ : /through|none/;
-  const idx = turns.map((t, i) => (want.test(t) ? i : -1)).filter((i) => i >= 0);
-  return idx.length ? pick(idx) : null;
-}
 
 function nearest(p: LngLat, heading: number, recs: LaneRecord[]): Match | null {
   const kx = Math.cos(toRad(p[1])) * 111320, ky = 110540;
@@ -92,37 +83,48 @@ function nearest(p: LngLat, heading: number, recs: LaneRecord[]): Match | null {
   return best;
 }
 
-export function placeOnLanes(coords: LngLat[], cum: number[], maneuvers: Maneuver[], roads: RoadDetails): LanePlacement {
+export function placeOnLanes(coords: LngLat[], cum: number[], maneuvers: Maneuver[], roads: RoadDetails, startLane: number | null = null): LanePlacement {
   const n = coords.length;
   const widths = new Array<number>(n).fill(0);
   const offs = new Array<number>(n).fill(0);
   const lanes = new Array<number>(n).fill(-1);
   const counts = new Array<number>(n).fill(0);
   const heights = new Array<number>(n).fill(0);
+  const stepOf = new Array<number>(n).fill(-1);
   const matches: (Match | null)[] = new Array(n).fill(null);
-  const target: (number | null)[] = new Array(n).fill(null);
-  // Which manoeuvre each vertex is approaching (for its lane choice).
-  let mi = 0;
   for (let i = 0; i < n; i++) {
     const p = coords[i];
     const h = bearing(coords[Math.max(0, i - 1)], coords[Math.min(n - 1, i + 1)]);
     const m = nearest(p, h, roads.lanesAt(p));
+    if (m && !laneCentres(m.rec, m.forward).length) continue;
     matches[i] = m;
-    while (mi < maneuvers.length && maneuvers[mi].at < cum[i] - 1) mi++;
-    const mv = maneuvers[mi];
-    if (m && mv && mv.at - cum[i] <= LEAD_M && mv.at - cum[i] >= -1) target[i] = laneFor(mv, m.rec, m.forward);
   }
-  // Lane choice → offset of the band centre and its width, per vertex.
+  // Sections: runs of vertices on the same record and direction (unmatched vertices break them).
+  const sections: Section[] = [];
+  const secOf = new Array<number>(n).fill(-1);
+  for (let i = 0; i < n; i++) {
+    const m = matches[i];
+    if (!m) continue;
+    const last = sections[sections.length - 1];
+    if (last && last.rec.id === m.rec.id && last.forward === m.forward && secOf[i - 1] === sections.length - 1) last.i1 = i;
+    else sections.push({ i0: i, i1: i, rec: m.rec, forward: m.forward, count: m.forward ? m.rec.f : m.rec.b, lw: m.rec.lw });
+    secOf[i] = sections.length - 1;
+  }
+  const plan = planLanes(sections, cum, maneuvers, startLane);
+  // Per vertex: the band covers all allowed lanes until the lane-change deadline, then the recommended lane.
   for (let i = 0; i < n; i++) {
     const m = matches[i];
     if (!m) continue;
     const centres = laneCentres(m.rec, m.forward);
-    if (!centres.length) { matches[i] = null; continue; }
-    const t = target[i];
-    const k = t === null ? centres.length - 1 : Math.max(0, Math.min(centres.length - 1, t)); // default: the right-hand lane
-    offs[i] = centres[k] - m.signed;
-    widths[i] = m.rec.lw;
-    lanes[i] = k;
+    const st = plan[secOf[i]];
+    stepOf[i] = secOf[i];
+    let lo = st.recommended, hi = st.recommended;
+    if (st.allowed && cum[i] < st.mustBeInBy) { lo = Math.min(...st.allowed); hi = Math.max(...st.allowed); }
+    lo = Math.max(0, Math.min(centres.length - 1, lo));
+    hi = Math.max(lo, Math.min(centres.length - 1, hi));
+    offs[i] = (centres[lo] + centres[hi]) / 2 - m.signed;
+    widths[i] = (hi - lo + 1) * m.rec.lw;
+    lanes[i] = st.recommended;
     counts[i] = centres.length;
     heights[i] = m.h;
   }
@@ -164,7 +166,7 @@ export function placeOnLanes(coords: LngLat[], cum: number[], maneuvers: Maneuve
   }
   // a vertex between two elevated ones is elevated too (short unmatched gaps on a deck)
   for (let i = 1; i < n - 1; i++) if (!heights[i] && heights[i - 1] > 0.3 && heights[i + 1] > 0.3) heights[i] = (heights[i - 1] + heights[i + 1]) / 2;
-  return { coords: out, widths, lanes, counts, heights };
+  return { coords: out, widths, lanes, counts, heights, plan, sections, step: stepOf };
 }
 
 /**
