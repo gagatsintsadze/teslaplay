@@ -17,7 +17,7 @@ export type RouteRole = 'primary' | 'alternative' | 'traveled';
  * `w`: width in metres of the lanes the car drives in along this piece (0/absent = default width).
  * A line may be split into `parts` with different widths; `coords` is always the whole line.
  */
-export interface RouteLine { id: string; coords: LngLat[]; role: RouteRole; parts?: { coords: LngLat[]; w: number }[]; traffic?: { coords: LngLat[]; level: number; w?: number }[] }
+export interface RouteLine { id: string; coords: LngLat[]; role: RouteRole; parts?: { coords: LngLat[]; w: number; h?: number[] }[]; traffic?: { coords: LngLat[]; level: number; w?: number }[] }
 
 export interface MarkerSpec {
   id: string;
@@ -52,7 +52,9 @@ export interface MapEngine {
   setPadding(p: Padding): void;
   setRoutes(lines: RouteLine[]): void;
   setMarkers(layer: string, markers: MarkerSpec[]): void;
-  setUserMarker(coord: LngLat | null, el: HTMLElement, heading?: number): void;
+  setUserMarker(coord: LngLat | null, el: HTMLElement, heading?: number, height?: number): void;
+  /** Optional: structures (by id) the car is about to drive under, drawn see-through. */
+  setXray?(ids: string[]): void;
   /** Optional: a 3-D car model drawn at the user's position instead of the DOM puck. */
   setCarModel?(enabled: boolean, color: string): void;
   /** Fired when the user drags/zooms/rotates the map (not for programmatic moves). */

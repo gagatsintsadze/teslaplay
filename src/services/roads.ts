@@ -44,6 +44,8 @@ export interface LaneRecord {
   /** Junction cut-back at the start / end of `g`, metres. */
   cs: number;
   ce: number;
+  /** Height above ground per vertex of `g`, metres — only on bridges and their ramps. */
+  hz?: number[];
 }
 
 export interface RoadTile {
@@ -55,7 +57,7 @@ export interface RoadTile {
   draw: Record<string, any[]>;
 }
 
-export interface RoadScene { surf: any; jn: any; mk: any; ar: any; ex: any; sig: any }
+export interface RoadScene { surf: any; jn: any; mk: any; ar: any; ex: any; sh: any; sig: any }
 
 export const tileKey = (x: number, y: number) => `${DETAIL_Z}/${x}/${y}`;
 
@@ -158,7 +160,7 @@ export class RoadDetails {
 
   /** Everything drawable in these tiles, de-duplicated (a road crossing a tile edge is in both). */
   scene(keys: string[]): RoadScene {
-    const out: Record<string, any[]> = { surf: [], jn: [], mk: [], ar: [], ex: [], sig: [] };
+    const out: Record<string, any[]> = { surf: [], jn: [], mk: [], ar: [], ex: [], sh: [], sig: [] };
     const seen = new Set<string>();
     for (const k of keys) {
       const t = this.tiles.get(k);
@@ -173,7 +175,7 @@ export class RoadDetails {
       }
     }
     const fc = (features: any[]) => ({ type: 'FeatureCollection', features });
-    return { surf: fc(out.surf), jn: fc(out.jn), mk: fc(out.mk), ar: fc(out.ar), ex: fc(out.ex), sig: fc(out.sig) };
+    return { surf: fc(out.surf), jn: fc(out.jn), mk: fc(out.mk), ar: fc(out.ar), ex: fc(out.ex), sh: fc(out.sh), sig: fc(out.sig) };
   }
 
   /** Lane records in the tile under `p` (empty when it isn't loaded). */
@@ -247,13 +249,14 @@ export class RoadDetails {
 
 /** Tile JSON (see lanes.py) → lane records + GeoJSON features per kind. */
 export function parseTile(key: string, built: string, j: any): RoadTile {
-  const draw: Record<string, any[]> = { surf: [], jn: [], mk: [], ar: [], ex: [], sig: [] };
+  const draw: Record<string, any[]> = { surf: [], jn: [], mk: [], ar: [], ex: [], sh: [], sig: [] };
   const poly = (kind: string, props: (f: any) => any) => {
     for (const f of j[kind] || []) draw[kind].push({ type: 'Feature', properties: { id: f.id, ...props(f) }, geometry: { type: 'Polygon', coordinates: [f.g] } });
   };
   poly('surf', (f) => ({ c: f.c, br: f.br, tu: f.tu, ly: f.ly }));
   poly('jn', (f) => ({ ly: f.ly }));
-  poly('ex', (f) => ({ k: f.k, b: f.b, h: f.h }));
+  poly('ex', (f) => ({ k: f.k, b: f.b, h: f.h, s: f.s || f.id, c: f.c || '' }));
+  poly('sh', (f) => ({ s: f.s }));
   for (const f of j.mk || []) draw.mk.push({ type: 'Feature', properties: { id: f.id, k: f.k, ly: f.ly, br: f.br }, geometry: { type: 'LineString', coordinates: f.g } });
   for (const f of j.ar || []) draw.ar.push({ type: 'Feature', properties: { id: f.id, icon: `ta:${f.a}`, rot: f.r }, geometry: { type: 'Point', coordinates: f.g } });
   for (const s of j.s || []) draw.sig.push({ type: 'Feature', properties: { id: `${s[0]},${s[1]}` }, geometry: { type: 'Point', coordinates: s } });

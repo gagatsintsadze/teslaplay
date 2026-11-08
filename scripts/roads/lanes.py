@@ -328,7 +328,7 @@ def layout(tags):
 
 # ───────────────────────── model ─────────────────────────
 class Part:
-    __slots__ = ('id', 'lay', 'll', 'frame', 'm', 'L', 'cs', 'ce', 'n0', 'n1', 'signals', 'crossings', 'tiles')
+    __slots__ = ('id', 'lay', 'll', 'frame', 'm', 'L', 'cs', 'ce', 'n0', 'n1', 'signals', 'crossings', 'tiles', 'h', 'cum')
 
     def __init__(self, pid, lay, ll):
         self.id = pid
@@ -340,6 +340,10 @@ class Part:
         self.cs = self.ce = 0.0
         self.n0 = key(ll[0])
         self.n1 = key(ll[-1])
+        self.cum = [0.0]
+        for a, b in zip(self.m, self.m[1:]):
+            self.cum.append(self.cum[-1] + seglen(a, b))
+        self.h = [0.0] * len(self.m)   # height above local ground per vertex of m (structures)
         self.signals = []    # along positions of traffic lights on this part
         self.crossings = []  # along positions of zebra crossings
         self.tiles = set()
@@ -447,6 +451,7 @@ def build(raw):
                 p.signals.append((along_of(p, ll), i == 0, i == last))
             if k in crossings:
                 p.crossings.append(along_of(p, ll))
+    solve_heights(parts, ends)
     return parts, ends, signals
 
 
@@ -463,6 +468,187 @@ def along_of(p, ll):
                 bestd, best = dd, acc + d * t
         acc += d
     return best
+
+
+# ───────────────────────── structures: heights ─────────────────────────
+LEVEL_H = 6.0      # metres per OSM layer: ~5 m clearance + a 1 m deck
+GRADE = 0.06       # approach ramps climb at 6 %
+DECK_T = 0.9       # deck slab thickness
+SLICE = 8.0        # ramps are emitted as slabs this long (≤ 0.5 m step at 6 %)
+PIER_EVERY = 28.0
+
+
+def h_at(p, s):
+    """Height of part p at distance s along it (linear between vertices)."""
+    cum, h = p.cum, p.h
+    if s <= 0:
+        return h[0]
+    for i in range(1, len(cum)):
+        if cum[i] >= s:
+            t = (s - cum[i - 1]) / max(1e-9, cum[i] - cum[i - 1])
+            return h[i - 1] + (h[i] - h[i - 1]) * t
+    return h[-1]
+
+
+def solve_heights(parts, ends):
+    """
+    OSM has no heights, only `layer`. Bridges are put at 6 m per layer; the roads leading up to
+    them are tapered from the deck down to the ground at 6 % (the Yandex/Apple look of real ramps),
+    stopping at the first junction with other roads. When a bridge starts straight out of a junction
+    (OSM often begins `bridge=yes` at the abutment with no mapped approach), the last part of the
+    bridge itself carries the slope. Tunnels stay at ground and are drawn dimmed.
+    """
+    bridges = [p for p in parts if p.lay['br']]
+    for p in bridges:
+        H = LEVEL_H * max(1, p.lay['ly'])
+        p.h = [H] * len(p.m)
+
+    def continuation(node, frm):
+        """The non-structure part that carries straight on from `frm` at `node`, or None."""
+        best = None
+        m = frm.m
+        u = (m[-2][0] - m[-1][0], m[-2][1] - m[-1][1]) if frm.n1 == node else (m[1][0] - m[0][0], m[1][1] - m[0][1])
+        L = math.hypot(*u) or 1.0
+        u = (u[0] / L, u[1] / L)   # pointing away from the node, along frm
+        for q, at_end in ends.get(node, []):
+            if q is frm or q.lay['br'] or q.lay['tu'] or any(q.h):
+                continue
+            mq = q.m
+            v = (mq[-2][0] - mq[-1][0], mq[-2][1] - mq[-1][1]) if at_end else (mq[1][0] - mq[0][0], mq[1][1] - mq[0][1])
+            Lv = math.hypot(*v) or 1.0
+            v = (v[0] / Lv, v[1] / Lv)
+            dot = u[0] * v[0] + u[1] * v[1]
+            if dot < -0.6 and (best is None or dot < best[0]):
+                best = (dot, q, at_end)
+        return best
+
+    for p in bridges:
+        H = p.h[0]
+        need = H / GRADE
+        for node, at_end in ((p.n0, False), (p.n1, True)):
+            # chain of approach parts, each walked from the node outwards
+            chain = []
+            total = 0.0
+            cur, cur_node = p, node
+            while total < need and len(chain) < 8:
+                c = continuation(cur_node, cur)
+                if not c:
+                    break
+                _, q, q_at_end = c
+                chain.append((q, q_at_end))
+                total += q.L
+                cur, cur_node = q, (q.n0 if q_at_end else q.n1)
+                if len(ends.get(cur_node, [])) != 2:
+                    break   # a junction with other roads: the ramp must be on the ground there
+            if total < 25.0:
+                # no usable approach: slope down on the bridge itself (its last 40 %)
+                ramp = min(need, p.L * 0.4)
+                for i, cum in enumerate(p.cum):
+                    d = (p.L - cum) if at_end else cum
+                    if d < ramp:
+                        p.h[i] = min(p.h[i], H * d / ramp)
+                if total == 0:
+                    continue
+            ramp = min(need, total)
+            s0 = 0.0
+            for q, q_at_end in chain:
+                for i, cum in enumerate(q.cum):
+                    d = s0 + ((q.L - cum) if q_at_end else cum)   # distance from the bridge end
+                    q.h[i] = max(q.h[i], max(0.0, H * (1 - d / ramp)))
+                s0 += q.L
+    # smooth the kinks slightly (one pass of neighbour averaging on interior vertices)
+    for p in parts:
+        if any(p.h) and len(p.h) > 2:
+            h = p.h[:]
+            for i in range(1, len(h) - 1):
+                p.h[i] = (h[i - 1] + 2 * h[i] + h[i + 1]) / 4
+
+
+def slices(p):
+    """[(s0, s1)] along the trimmed core of an elevated part: whole where flat, SLICE-long on ramps."""
+    out = []
+    s0 = p.cs
+    end = p.L - p.ce
+    while s0 < end - 0.5:
+        s1 = min(end, s0 + SLICE)
+        # extend the slice while the height stays flat
+        while s1 < end - 0.5 and abs(h_at(p, s1 + SLICE) - h_at(p, s0)) < 0.05:
+            s1 = min(end, s1 + SLICE)
+        out.append((s0, s1))
+        s0 = s1
+    return out
+
+
+def rect(fr, q, u, along0, along1, off0, off1):
+    """Quad on the part's frame: along the direction u from q, between lateral offsets."""
+    n = (u[1], -u[0])
+
+    def pt(a, o):
+        return fr.to_ll((q[0] + u[0] * a + n[0] * o, q[1] + u[1] * a + n[1] * o))
+    return [pt(along0, off0), pt(along1, off0), pt(along1, off1), pt(along0, off1), pt(along0, off0)]
+
+
+def emit_structure(p, rec, add):
+    """An elevated road part as 3-D slabs: deck, lane surface, markings, parapets, piers, shadow."""
+    lay = p.lay
+    fr = p.frame
+    N = lay['f'] + lay['b']
+    lw, left = lay['lw'], lay['l']
+    right = left + N * lw
+    sid = p.id
+    cls = rec['c']
+    pier_next = PIER_EVERY / 2
+    for k, (s0, s1) in enumerate(slices(p)):
+        h = max(0.12, (h_at(p, s0) + h_at(p, s1)) / 2)
+        seg = sub(p.m, s0, s1)
+        if seg is None:
+            continue
+        base = max(0.0, h - DECK_T)
+        top = round(h, 2)
+        deck = [fr.to_ll(q) for q in ribbon(seg, left - 0.45, right + 0.45)]
+        add('ex', {'id': f'{sid}d{k}', 'g': deck, 'b': round(base, 2), 'h': top, 'k': 'deck', 's': sid, 'c': cls}, deck)
+        # markings as thin slabs on the deck top
+        mk = sub(p.m, s0 + 0.2, s1 - 0.2)
+        if mk is not None and h > 0.3:
+            mb, mh = round(h + 0.03, 2), round(h + 0.08, 2)
+            for off in (left + EDGE_IN, right - EDGE_IN):
+                ring = [fr.to_ll(q) for q in ribbon(mk, off - 0.08, off + 0.08)]
+                add('ex', {'id': f'{sid}e{k}{"L" if off < 0 else "R"}', 'g': ring, 'b': mb, 'h': mh, 'k': 'dmk', 's': sid}, ring)
+            for i in range(1, N):
+                off = left + i * lw
+                centre = lay['b'] and i == lay['b']
+                if centre and not (lay['f'] == 1 and lay['b'] == 1):
+                    for o in (off - 0.15, off + 0.15):
+                        ring = [fr.to_ll(q) for q in ribbon(mk, o - 0.08, o + 0.08)]
+                        add('ex', {'id': f'{sid}c{k}{i}{int(o * 10)}', 'g': ring, 'b': mb, 'h': mh, 'k': 'dmk', 's': sid}, ring)
+                    continue
+                dash, gap = (3.0, 6.0) if centre else (3.0, 9.0)
+                a = s0 + 0.2 - ((s0 + 0.2) % (dash + gap))   # phase continues across slices
+                while a < s1 - 0.2:
+                    d0, d1 = max(a, s0 + 0.2), min(a + dash, s1 - 0.2)
+                    if d1 - d0 > 0.4:
+                        q, u = point_at(p.m, d0)
+                        ring = rect(fr, q, u, 0, d1 - d0, off - 0.08, off + 0.08)
+                        add('ex', {'id': f'{sid}m{k}{i}{int(a)}', 'g': ring, 'b': mb, 'h': mh, 'k': 'dmk', 's': sid}, ring)
+                    a += dash + gap
+        # parapets
+        if h >= 1.0:
+            for off in (left - 0.3, right + 0.3):
+                ring = [fr.to_ll(q) for q in ribbon(seg, off - 0.15, off + 0.15)]
+                add('ex', {'id': f'{sid}r{k}{"L" if off < 0 else "R"}', 'g': ring, 'b': top, 'h': round(h + 1.0, 2), 'k': 'rail', 's': sid}, ring)
+        # shadow on the ground, cast to the south-east
+        if h >= 1.0:
+            dx, dy = 0.45 * h, -0.35 * h
+            sh = [fr.to_ll((q[0] + dx, q[1] + dy)) for q in ribbon(seg, left - 0.6, right + 0.6)]
+            add('sh', {'id': f'{sid}s{k}', 'g': sh, 's': sid}, sh)
+        # piers
+        while pier_next < s1:
+            if pier_next >= s0 and h >= 3.5:
+                q, u = point_at(p.m, pier_next)
+                half = min(2.2, (right - left) * 0.3)
+                ring = rect(fr, q, u, -0.8, 0.8, (left + right) / 2 - half, (left + right) / 2 + half)
+                add('ex', {'id': f'{sid}p{int(pier_next)}', 'g': ring, 'b': 0, 'h': round(base, 2), 'k': 'pier', 's': sid}, ring)
+            pier_next += PIER_EVERY
 
 
 # ───────────────────────── features ─────────────────────────
@@ -496,14 +682,21 @@ def emit(parts, ends, signals):
         rec = {'id': p.id, 'c': lay['c'] + ('_link' if lay['link'] else ''), 'g': p.ll, 'lw': lw, 'l': left, 'f': lay['f'], 'b': lay['b'],
                'o': 1 if lay['o'] else 0, 'tf': lay['tf'], 'tb': lay['tb'], 'br': 1 if lay['br'] else 0, 'tu': 1 if lay['tu'] else 0,
                'ly': lay['ly'], 'ms': lay['ms'], 'mb': lay['mb'], 'rb': 1 if lay['rb'] else 0, 'cs': round(p.cs, 1), 'ce': round(p.ce, 1)}
+        elevated = max(p.h) > 0.3
+        if elevated:
+            # heights along g (same vertices as m, which was de-duplicated from ll: map by nearest cum)
+            rec['hz'] = [round(h_at(p, along_of(p, q)), 1) for q in p.ll]
         for k in keys:
             feats[k].setdefault('w', []).append(rec)
-        # asphalt between the cuts
         core = sub(m, p.cs, p.L - p.ce)
         if core is None:
             core = sub(m, 0, p.L)
         if core is None:
             continue
+        if elevated:
+            emit_structure(p, rec, add)
+            continue
+        # asphalt between the cuts
         ring = [fr.to_ll(q) for q in ribbon(core, left, right)]
         add('surf', {'id': p.id, 'g': ring, 'c': rec['c'], 'br': rec['br'], 'tu': rec['tu'], 'ly': lay['ly']}, ring)
         # markings (clear of the junction by 0.3 m)
@@ -571,12 +764,6 @@ def emit(parts, ends, signals):
                     off = left + (i + 0.5) * lw
                     pt = fr.to_ll((q[0] + u[1] * off, q[1] - u[0] * off))
                     add('ar', {'id': f'{p.id}b{j}{int(dist)}', 'g': pt, 'a': t, 'r': round(bearing(ub), 1)}, [pt])
-        # bridges: parapets along both kerbs, standing on the deck
-        if lay['br']:
-            base = max(0, lay['ly'] - 1) * 1.6
-            for off in (left - 0.15, right + 0.15):
-                ring = [fr.to_ll(q) for q in ribbon(core, off - 0.2, off + 0.2)]
-                add('ex', {'id': f'{p.id}{"L" if off < 0 else "R"}', 'g': ring, 'b': base, 'h': base + 1.1, 'k': 'rail'}, ring)
     # junction polygons
     for node, lst in ends.items():
         if len(lst) < 2:
@@ -624,7 +811,11 @@ def emit(parts, ends, signals):
             continue
         ring = [fr.to_ll(q) for q in h] + [fr.to_ll(h[0])]
         jid = f'j{node[0]}_{node[1]}'
-        add('jn', {'id': jid, 'g': ring, 'ly': ly}, ring)
+        hj = max(h_at(p, p.L if at_end else 0.0) for p, at_end in lst)
+        if hj > 0.3:
+            add('ex', {'id': jid, 'g': ring, 'b': round(max(0.0, hj - DECK_T), 2), 'h': round(hj, 2), 'k': 'deck', 's': jid, 'c': lst[0][0].lay['c']}, ring)
+        else:
+            add('jn', {'id': jid, 'g': ring, 'ly': ly}, ring)
     # traffic lights
     for s in signals:
         add('s', [s[0], s[1]], [s])

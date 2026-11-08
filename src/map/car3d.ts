@@ -183,6 +183,7 @@ export class CarLayer {
   private parsed: Parsed | null = null;
   private pos: LngLat | null = null;
   private heading = 0;
+  private height = 0;
   private paint: [number, number, number] = [0.9, 0.9, 0.92];
   visible = true;
   ready = false;
@@ -200,9 +201,10 @@ export class CarLayer {
   }
 
   /** Where the car is and which way it points (degrees clockwise from north). */
-  update(pos: LngLat | null, heading: number) {
+  update(pos: LngLat | null, heading: number, height = 0) {
     this.pos = pos;
     this.heading = heading;
+    this.height = height;
     if (this.ready && this.visible) this.map.triggerRepaint();
   }
 
@@ -268,7 +270,7 @@ export class CarLayer {
 
   render(gl: WebGLRenderingContext, matrix: number[]) {
     if (!this.ready || !this.visible || !this.pos || !this.prog) return;
-    const mc = this.maplibre.MercatorCoordinate.fromLngLat({ lng: this.pos[0], lat: this.pos[1] }, 0);
+    const mc = this.maplibre.MercatorCoordinate.fromLngLat({ lng: this.pos[0], lat: this.pos[1] }, this.height);
     const mPerUnit = mc.meterInMercatorCoordinateUnits();
     // Nav apps draw the car a little bigger than life so it reads at any zoom: at least ~48 px long.
     const pxPerM = (2 ** this.map.getZoom()) * PX_PER_M_Z0;
@@ -281,7 +283,7 @@ export class CarLayer {
       rx * scale, ry * scale, 0, 0,
       fx * scale, fy * scale, 0, 0,
       0, 0, scale, 0,
-      mc.x, mc.y, 0.0, 1,
+      mc.x, mc.y, mc.z, 1,
     ];
     const mvp = mul(matrix, model);
     const rot = [rx, ry, 0, fx, fy, 0, 0, 0, 1];           // normals: no scale

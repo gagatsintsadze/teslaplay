@@ -61,7 +61,13 @@ export class FollowController {
   private laneShiftTarget = 0;
   setLaneShift(m: number) { this.laneShiftTarget = m; this.kick(); }
 
-  setDisplayCoords(coords: LngLat[] | null) { this.shown = coords && this.route && coords.length === this.route.coords.length ? coords : null; }
+  private heights: number[] | null = null;
+  setDisplayCoords(coords: LngLat[] | null, heights: number[] | null = null) {
+    this.shown = coords && this.route && coords.length === this.route.coords.length ? coords : null;
+    this.heights = heights && this.route && heights.length === this.route.coords.length ? heights : null;
+  }
+  /** Height of the road under the car (bridges, ramps), metres. */
+  height = 0;
 
   setNavigation(route: RouteResult | null) {
     this.route = route;
@@ -136,6 +142,7 @@ export class FollowController {
       const line = this.shown || this.route.coords;
       const here = pointAt(line, this.route.cum, d);
       const ahead = pointAt(line, this.route.cum, d + 12);
+      if (this.heights) { const hs = this.heights, cum = this.route.cum, i = here.seg; const t = cum[i + 1] > cum[i] ? Math.max(0, Math.min(1, (d - cum[i]) / (cum[i + 1] - cum[i]))) : 0; this.height = hs[i] + ((hs[i + 1] ?? hs[i]) - hs[i]) * t; } else this.height = 0;
       target = bearing(here.coord, ahead.coord);
       this.laneShift += (this.laneShiftTarget - this.laneShift) * 0.06;
       this.disp = Math.abs(this.laneShift) > 0.05 ? destination(here.coord, target + 90, this.laneShift) : here.coord;
@@ -147,7 +154,7 @@ export class FollowController {
 
     const view = this.engine.getView();
     const stale = Date.now() - fix.time > 15000;
-    this.engine.setUserMarker(this.disp, this.puck.el, this.heading);
+    this.engine.setUserMarker(this.disp, this.puck.el, this.heading, this.height);
     this.puck.update(this.hasHeading ? this.heading - view.azimuth : null, this.navigating && this.mode === 'course', stale);
 
     const camInterval = this.opts.lite() ? 66 : 33;

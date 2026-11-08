@@ -5,6 +5,8 @@ import { trafficTilesUrl } from '../services/mapbox';
 import { arrowImage, turnSet } from './arrows';
 import { addRoadLayers, metres, setRoadScene } from './roadlayers';
 import { CarLayer } from './car3d';
+import { RouteBandLayer, type BandRun } from './band3d';
+import { setXray } from './roadlayers';
 import type { RoadScene } from '../services/roads';
 import { buildStyle, PALETTES } from './style';
 
@@ -246,6 +248,7 @@ export class OsmEngine implements MapEngine {
     addRoadLayers(map, this.theme);
     if (this.scene) setRoadScene(map, this.scene);
     if (this.carWanted) this.applyCar();
+    this.band = null;
     this.applyTraffic();
     this.paintRoutes();
     this.applyNavOverlay();
@@ -459,16 +462,28 @@ export class OsmEngine implements MapEngine {
       map.setPaintProperty(l.id, 'line-width', metres(metresExpr, px));
     }
     const features: any[] = [];
+    const runs: BandRun[] = [];
+    const hex = (c: string): [number, number, number] => { const n = parseInt(c.replace('#', ''), 16); return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]; };
     for (const r of this.routes) {
       const pieces = r.parts && r.parts.length ? r.parts : [{ coords: r.coords, w: 0 }];
       for (const p of pieces) {
         if (p.coords.length < 2) continue;
+        if (p.h && p.h.some((h) => h > 0.3)) {
+          // on a bridge or ramp: the band is drawn at the deck's height by the custom layer
+          runs.push({ coords: p.coords, heights: p.h, width: Math.max(2.4, (p.w || 3.2) - 0.5), color: hex(colors[r.role === 'primary' ? 'primary' : 'alternative'].fill) });
+          continue;
+        }
         const props: any = { role: r.role };
         if (p.w > 0) props.wm = Math.max(2.4, p.w - 0.5); // the band fills the lanes, 25 cm of asphalt showing each side
         features.push({ type: 'Feature', properties: props, geometry: { type: 'LineString', coordinates: p.coords } });
       }
     }
     src.setData({ type: 'FeatureCollection', features });
+    if (runs.length && !this.band) {
+      this.band = new RouteBandLayer(this.gl, map);
+      map.addLayer(this.band, map.getLayer('tp-buildings') ? 'tp-buildings' : undefined);
+    }
+    if (this.band) this.band.setRuns(runs);
     const slow = map.getSource('tp-route-traffic');
     if (slow) {
       const p = colors.primary;
@@ -529,8 +544,12 @@ export class OsmEngine implements MapEngine {
     }
   }
 
-  setUserMarker(coord: LngLat | null, el: HTMLElement, heading = 0) {
-    if (this.car) this.car.update(coord, heading);
+  setXray(ids: string[]) { if (this.map) setXray(this.map, ids); }
+
+  private band: RouteBandLayer | null = null;
+
+  setUserMarker(coord: LngLat | null, el: HTMLElement, heading = 0, height = 0) {
+    if (this.car) this.car.update(coord, heading, height);
     if (!coord) {
       if (this.user) { this.user.remove(); this.user = null; }
       return;

@@ -24,7 +24,7 @@ export function metres(m: any, minPx = 0): any {
   return ['interpolate', ['exponential', 2], ['zoom'], ...stops];
 }
 
-export const ROAD_SOURCES = ['tp-surf', 'tp-jn', 'tp-mk', 'tp-ar', 'tp-ex', 'tp-sig'] as const;
+export const ROAD_SOURCES = ['tp-surf', 'tp-jn', 'tp-mk', 'tp-ar', 'tp-ex', 'tp-sh', 'tp-sig'] as const;
 
 const fade = (from: number, to: number, max: any = 1): any => ['interpolate', ['linear'], ['zoom'], from, 0, to, max];
 
@@ -83,15 +83,29 @@ export function addRoadLayers(map: any, theme: 'light' | 'dark') {
     mark('stop', metres(0.4, 1.5));
     mark('zebra', metres(3.2, 2), { 'line-dasharray': dashM(0.5, 0.5, 3.2, 2), 'line-opacity': fade(16.1, 16.8, 0.85) }); // 0.5 m stripes
   }
-  // Bridge parapets and tunnel portals: fill-extrusions standing on the ground.
+  // Structures in 3-D: bridge decks (sliced along ramps), their lane markings as thin slabs, parapets,
+  // piers, tunnel portals. Shadows are flat fills on the ground. Decks over a car driving underneath go
+  // to the x-ray copy of the layer (setXray) so the road below stays visible.
+  const exBefore = map.getLayer('tp-buildings') ? 'tp-buildings' : undefined;
   map.addLayer({
-    id: 'tp-ex', type: 'fill-extrusion', source: 'tp-ex', minzoom: 15,
-    paint: {
-      'fill-extrusion-color': ['match', ['get', 'k'], 'portal', theme === 'dark' ? '#5c6676' : '#b6ad9f', P.bridgeKerb],
-      'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-base': ['get', 'b'],
-      'fill-extrusion-opacity': 0.96,
-    },
-  }, map.getLayer('tp-buildings') ? 'tp-buildings' : undefined);
+    id: 'tp-sh', type: 'fill', source: 'tp-sh', minzoom: 15.5,
+    paint: { 'fill-color': '#000', 'fill-opacity': fade(15.5, 16.5, 0.16), 'fill-antialias': false },
+  }, exBefore);
+  const exColor: any = ['match', ['get', 'k'],
+    'portal', theme === 'dark' ? '#5c6676' : '#b6ad9f',
+    'dmk', P.marking,
+    'pier', theme === 'dark' ? '#4a515c' : '#a9a49a',
+    'rail', P.bridgeKerb,
+    'deck', ['match', ['get', 'c'], ['motorway', 'trunk', 'primary', 'secondary', 'motorway_link', 'trunk_link', 'primary_link', 'secondary_link'], P.asphalt, P.asphaltMinor],
+    P.bridgeKerb];
+  const exPaint = (opacity: number) => ({
+    'fill-extrusion-color': exColor,
+    'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-base': ['get', 'b'],
+    'fill-extrusion-opacity': opacity,
+    'fill-extrusion-vertical-gradient': false,
+  });
+  map.addLayer({ id: 'tp-ex', type: 'fill-extrusion', source: 'tp-ex', minzoom: 15, filter: ['!', ['in', ['get', 's'], ['literal', []]]], paint: exPaint(1) }, exBefore);
+  map.addLayer({ id: 'tp-ex-xray', type: 'fill-extrusion', source: 'tp-ex', minzoom: 15, filter: ['in', ['get', 's'], ['literal', []]], paint: exPaint(0.3) }, exBefore);
   // Painted turn arrows: the icon is 40 × 80 px (@2x) and stands for 1.4 m × 2.8 m on the road.
   map.addLayer({
     id: 'tp-ar', type: 'symbol', source: 'tp-ar', minzoom: 16.6,
@@ -115,6 +129,13 @@ export function addRoadLayers(map: any, theme: 'light' | 'dark') {
   }, map.getLayer('poi-dot') ? 'poi-dot' : undefined);
 }
 
+/** Structures (by their `s` id) the car is about to drive under: drawn see-through. */
+export function setXray(map: any, ids: string[]) {
+  if (!map.getLayer('tp-ex-xray')) return;
+  map.setFilter('tp-ex', ['!', ['in', ['get', 's'], ['literal', ids]]]);
+  map.setFilter('tp-ex-xray', ['in', ['get', 's'], ['literal', ids]]);
+}
+
 export function setRoadScene(map: any, scene: RoadScene) {
   const set = (id: string, data: any) => { const s = map.getSource(id); if (s) s.setData(data); };
   set('tp-surf', scene.surf);
@@ -122,5 +143,6 @@ export function setRoadScene(map: any, scene: RoadScene) {
   set('tp-mk', scene.mk);
   set('tp-ar', scene.ar);
   set('tp-ex', scene.ex);
+  set('tp-sh', scene.sh);
   set('tp-sig', scene.sig);
 }

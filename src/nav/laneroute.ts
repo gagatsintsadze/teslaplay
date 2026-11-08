@@ -22,9 +22,9 @@ const MATCH_M = 16;      // how far a route vertex may be from a reference line 
 const LEAD_M = 180;      // start moving into the turn lanes this far before the manoeuvre
 const BLEND_M = 90;      // lane changes are spread over this distance
 
-export interface LanePlacement { coords: LngLat[]; widths: number[]; /** chosen lane per vertex (0 = leftmost of the direction of travel), -1 where unmatched */ lanes: number[]; /** lanes available in the direction of travel per vertex */ counts: number[] }
+export interface LanePlacement { coords: LngLat[]; widths: number[]; /** chosen lane per vertex (0 = leftmost of the direction of travel), -1 where unmatched */ lanes: number[]; /** lanes available in the direction of travel per vertex */ counts: number[]; /** road height above ground per vertex (bridges, ramps), metres */ heights: number[] }
 
-interface Match { rec: LaneRecord; forward: boolean; signed: number; d: number }
+interface Match { rec: LaneRecord; forward: boolean; signed: number; d: number; /** height of the road at the matched point */ h: number }
 
 /** Lane offsets from the reference line in the frame of travel (right positive), leftmost lane first. */
 function laneCentres(r: LaneRecord, forward: boolean): number[] {
@@ -85,7 +85,8 @@ function nearest(p: LngLat, heading: number, recs: LaneRecord[]): Match | null {
       const cross = dx * -py - dy * -px; // (dx,dy) × (−px,−py): vertex is at the origin, foot at (px,py)
       let signed = (cross < 0 ? 1 : -1) * d; // right of the way's direction is positive
       if (!along) signed = -signed;
-      best = { rec: r, forward: along, signed, d };
+      const h = r.hz ? r.hz[i] + ((r.hz[i + 1] ?? r.hz[i]) - r.hz[i]) * t : 0;
+      best = { rec: r, forward: along, signed, d, h };
     }
   }
   return best;
@@ -97,6 +98,7 @@ export function placeOnLanes(coords: LngLat[], cum: number[], maneuvers: Maneuve
   const offs = new Array<number>(n).fill(0);
   const lanes = new Array<number>(n).fill(-1);
   const counts = new Array<number>(n).fill(0);
+  const heights = new Array<number>(n).fill(0);
   const matches: (Match | null)[] = new Array(n).fill(null);
   const target: (number | null)[] = new Array(n).fill(null);
   // Which manoeuvre each vertex is approaching (for its lane choice).
@@ -122,6 +124,7 @@ export function placeOnLanes(coords: LngLat[], cum: number[], maneuvers: Maneuve
     widths[i] = m.rec.lw;
     lanes[i] = k;
     counts[i] = centres.length;
+    heights[i] = m.h;
   }
   // Blend lane changes: vertices within BLEND_M before a change ease towards the new lanes.
   const rawO = offs.slice(), rawW = widths.slice();
@@ -159,7 +162,9 @@ export function placeOnLanes(coords: LngLat[], cum: number[], maneuvers: Maneuve
     const miter = Math.min(2.5, 1 / Math.max(0.2, Math.cos(toRad(turn / 2))));
     out[i] = destination(coords[i], normalize360(b1 + turn / 2 + 90), o * miter);
   }
-  return { coords: out, widths, lanes, counts };
+  // a vertex between two elevated ones is elevated too (short unmatched gaps on a deck)
+  for (let i = 1; i < n - 1; i++) if (!heights[i] && heights[i - 1] > 0.3 && heights[i + 1] > 0.3) heights[i] = (heights[i - 1] + heights[i + 1]) / 2;
+  return { coords: out, widths, lanes, counts, heights };
 }
 
 /**

@@ -1,5 +1,5 @@
 import type { App } from './app';
-import { simplify, slice } from './core/geo';
+import { simplify, slice, sliceWith } from './core/geo';
 import { shallowEqualArray } from './core/store';
 import type { MarkerSpec, RouteLine } from './map/engine';
 import { chargerMarker, cityLabel, pinMarker } from './map/markers';
@@ -61,25 +61,32 @@ export function bindMap(app: App) {
   let drawnAt = -1e9;
   // Live-traffic slow stretches of a route from distance `from` on, as drawable pieces.
   // Pieces of the drawn route with the lane-band width they run in (quantised to 0.5 m), from `from` on.
+  // Pieces also split where the road leaves or reaches the ground (bridges, ramps), carrying heights.
   const parts = (r: RouteResult, from = 0) => {
-    const { coords, widths } = app.drawGeometry(r);
+    const { coords, widths, heights } = app.drawGeometry(r);
     const end = r.cum[r.cum.length - 1];
     if (!widths.length) return [{ coords: slice(coords, r.cum, from, end), w: 0 }];
-    const out: { coords: LngLat[]; w: number }[] = [];
+    const out: { coords: LngLat[]; w: number; h?: number[] }[] = [];
     const q = (i: number) => Math.round(widths[i] * 2) / 2;
+    const up = (i: number) => (heights[i] || 0) > 0.3 || (heights[i + 1] || 0) > 0.3 || (heights[i - 1] || 0) > 0.3;
+    const piece = (a: number, b: number, w: number) => {
+      const cut = sliceWith(coords, r.cum, heights, a, b);
+      out.push(cut.vals.some((h) => h > 0.3) ? { coords: cut.coords, w, h: cut.vals } : { coords: cut.coords, w });
+    };
     let start = Math.max(0, from);
     let i = 0;
     while (i < r.cum.length && r.cum[i] <= start) i++;
     let w = q(Math.max(0, i - 1));
+    let e = up(Math.max(0, i - 1));
     for (; i < r.cum.length; i++) {
-      const wi = q(i);
-      if (wi !== w && r.cum[i] > start + 1) {
+      const wi = q(i), ei = up(i);
+      if ((wi !== w || ei !== e) && r.cum[i] > start + 1) {
         const d = Math.min(end, r.cum[i]);
-        out.push({ coords: slice(coords, r.cum, start, d), w });
-        start = d; w = wi;
+        piece(start, d, w);
+        start = d; w = wi; e = ei;
       }
     }
-    if (end > start) out.push({ coords: slice(coords, r.cum, start, end), w });
+    if (end > start) piece(start, end, w);
     return out;
   };
   const widthAt = (r: RouteResult, d: number) => { const { widths } = app.drawGeometry(r); if (!widths.length) return 0; let i = 0; while (i < r.cum.length - 1 && r.cum[i + 1] < d) i++; return widths[i] || 0; };

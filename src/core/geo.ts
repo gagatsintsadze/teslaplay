@@ -207,6 +207,17 @@ export function slice(coords: LngLat[], cum: number[], fromD: number, toD: numbe
   return out;
 }
 
+/** Like slice(), also returning a per-vertex value interpolated from `vals` (one per input vertex). */
+export function sliceWith(coords: LngLat[], cum: number[], vals: number[], fromD: number, toD: number): { coords: LngLat[]; vals: number[] } {
+  const at = (d: number) => { const p = pointAt(coords, cum, d); const i = p.seg; const t = (cum[i + 1] - cum[i]) > 0 ? Math.max(0, Math.min(1, (d - cum[i]) / (cum[i + 1] - cum[i]))) : 0; return { coord: p.coord, seg: i, v: vals[i] + ((vals[i + 1] ?? vals[i]) - vals[i]) * t }; };
+  if (toD <= fromD) { const a = at(fromD); return { coords: [a.coord], vals: [a.v] }; }
+  const a = at(fromD), b = at(toD);
+  const out: LngLat[] = [a.coord], vs: number[] = [a.v];
+  for (let i = a.seg + 1; i <= b.seg; i++) { out.push(coords[i]); vs.push(vals[i]); }
+  out.push(b.coord); vs.push(b.v);
+  return { coords: out, vals: vs };
+}
+
 /** Linear distance from a point to the nearest vertex-sampled position of a polyline (coarse, fast). */
 export function nearestSample(samples: { coord: LngLat; d: number }[], p: LngLat) {
   let best = samples[0];
@@ -234,4 +245,14 @@ export function offsetLine(coords: LngLat[], offsets: number[]): LngLat[] {
     out.push(destination(coords[i], dir, o * miter));
   }
   return out;
+}
+
+/** Ray-cast point-in-polygon on a lon/lat ring. */
+export function pointInRing(p: LngLat, ring: LngLat[]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+    if (yi > p[1] !== yj > p[1] && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }

@@ -1,7 +1,7 @@
 import type { AppConfig } from './config';
 import { isTesla, likelyLowEnd, measureSluggish } from './core/env';
 import { setUnits } from './core/format';
-import { boundsOf, distance, padBounds, pointAt, projectOnRoute, slice } from './core/geo';
+import { boundsOf, destination, distance, padBounds, pointAt, pointInRing, projectOnRoute, slice } from './core/geo';
 import { storage } from './core/storage';
 import { shallowEqualArray, Store } from './core/store';
 import { isDaylight, sunPosition } from './core/sun';
@@ -130,7 +130,7 @@ export class App {
       this.roads.onTile(() => { this.renderRoads(true); this.store.set({ roadsVersion: this.state.roadsVersion + 1 }); this.paintTrafficLanes(); });
       if ('onTrafficTiles' in this.engine) this.engine.onTrafficTiles = () => this.paintTrafficLanes();
       // The puck glides along the drawn (lane-aligned) line, not the road's centre line.
-      this.store.select((s) => [s.navRoute, s.roadsVersion], () => { if (this.state.navRoute) this.follow.setDisplayCoords(this.drawCoords(this.state.navRoute)); }, { equals: shallowEqualArray });
+      this.store.select((s) => [s.navRoute, s.roadsVersion], () => this.syncDisplayRoute(), { equals: shallowEqualArray });
     }
     this.engine.onClick((e) => this.onMapTap(e));
     this.engine.onLongPress((e) => this.dropPin(e.coord));
@@ -239,6 +239,41 @@ export class App {
     }, 400);
   }
 
+  /** Give the puck the route as drawn on its lanes (and its heights) — after the follow controller has the route. */
+  private syncDisplayRoute() {
+    const r = this.state.navRoute;
+    if (!r) return;
+    const g = this.drawGeometry(r);
+    this.follow.setDisplayCoords(g.coords, g.heights.length ? g.heights : null);
+  }
+
+  private xrayIds = '';
+  /**
+   * Structures the car is about to drive under (car on the ground, a deck within ~70 m ahead over
+   * the route) are drawn see-through so the road below stays readable.
+   */
+  private updateXray() {
+    if (!this.roads || !this.engine.setXray || !this.roadsCenter) return;
+    const pos = this.follow.position;
+    const ids: string[] = [];
+    if (pos && this.follow.height < 0.3) {
+      const h = this.follow.displayHeading || 0;
+      const probes = [pos, destination(pos, h, 25), destination(pos, h, 50), destination(pos, h, 75)];
+      const keys = this.roads.around(pos).map(([x, y]) => `14/${x}/${y}`);
+      for (const k of keys) {
+        const t = this.roads.tiles.get(k);
+        if (!t) continue;
+        for (const f of t.draw.ex || []) {
+          if (f.properties.k !== 'deck' || f.properties.h < 2) continue;
+          const ring = f.geometry.coordinates[0] as LngLat[];
+          if (probes.some((p) => pointInRing(p, ring)) && !ids.includes(f.properties.s)) ids.push(f.properties.s);
+        }
+      }
+    }
+    const sig = ids.join(',');
+    if (sig !== this.xrayIds) { this.xrayIds = sig; this.engine.setXray(ids); }
+  }
+
   private laneSeen: { shift: number; n: number } = { shift: 0, n: 0 };
   /**
    * The car is drawn on the recommended lane; when GPS says it is really in another lane of the same
@@ -260,10 +295,10 @@ export class App {
     if (this.laneSeen.n >= 3 || shift === 0) this.follow.setLaneShift(shift);
   }
 
-  private drawCache = new Map<string, { v: number; coords: LngLat[]; widths: number[]; lanes: number[]; counts: number[] }>();
+  private drawCache = new Map<string, { v: number; coords: LngLat[]; widths: number[]; lanes: number[]; counts: number[]; heights: number[] }>();
   /** Route geometry on its lanes (nav/laneroute.ts), plus the lane-band width per vertex (0 = no lane data). */
-  drawGeometry(r: RouteResult): { coords: LngLat[]; widths: number[]; lanes: number[]; counts: number[] } {
-    if (!this.roads) return { coords: r.coords, widths: [], lanes: [], counts: [] };
+  drawGeometry(r: RouteResult): { coords: LngLat[]; widths: number[]; lanes: number[]; counts: number[]; heights: number[] } {
+    if (!this.roads) return { coords: r.coords, widths: [], lanes: [], counts: [], heights: [] };
     const v = this.state.roadsVersion;
     const hit = this.drawCache.get(r.id);
     if (hit && hit.v === v) return hit;
@@ -290,6 +325,9 @@ export class App {
       this.session.handleFix(fix);
       this.follow.setFix(fix, this.session.snap ? this.session.snap.d : null);
       this.trackLane(fix);
+    }
+    if (this.roads) {
+      this.updateXray();
     } else {
       this.follow.setFix(fix, null);
     }
@@ -668,6 +706,7 @@ export class App {
     this.store.set({ navigating: true, navRoute: route, nav: null, arrived: false, tripOpen: false, rerouting: false });
     if (this.roads) this.roads.request(this.roads.along(route.coords), 1);
     this.follow.setNavigation(route);
+    this.syncDisplayRoute();
     this.follow.tilt3D = s.settings.view3D;
     this.follow.setMode('course');
     const simulate = forceSim || this.cfg.demo || this.cfg.autoSimulate || s.locStatus !== 'ok';
@@ -728,6 +767,7 @@ export class App {
     const plan2 = plan ? evaluateStops(r, model, remainingStops, soc, v, s.settings, { tempC: plan.tempC }) : null;
     sess.setRoute(r, plan2, model);
     this.follow.setNavigation(r);
+    this.syncDisplayRoute();
     if (this.roads) this.roads.request(this.roads.along(r.coords), 1);
     this.store.set({ navRoute: r, rerouting: false, plan: plan2 });
     if (restartSim && this.state.simulating) this.location.simulate(r, this.state.simSpeed);
