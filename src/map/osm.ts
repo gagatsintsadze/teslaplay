@@ -292,7 +292,7 @@ export class OsmEngine implements MapEngine {
         id: 'tp-traffic-lanes', type: 'fill', source: 'tp-traffic-lanes', minzoom: 15,
         paint: {
           'fill-color': ['match', ['get', 'congestion'], 'low', '#30d158', 'moderate', SLOW_COLORS[2], 'heavy', SLOW_COLORS[3], SLOW_COLORS[4]],
-          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 15, 0, 16, ['match', ['get', 'congestion'], 'low', 0.28, 0.55]],
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 15, 0, 16, ['*', ['case', ['==', ['get', 'tu'], 1], 0.45, 1], ['match', ['get', 'congestion'], 'low', 0.28, 0.55]]],
           'fill-antialias': false,
         },
       }, map.getLayer('tp-mk-edge') ? 'tp-mk-edge' : before);

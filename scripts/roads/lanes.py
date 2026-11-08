@@ -348,6 +348,26 @@ class Part:
         self.crossings = []  # along positions of zebra crossings
         self.tiles = set()
 
+    def densify(self, step=10.0):
+        """Insert vertices so no segment is longer than `step` (structures need vertices to carry a height profile)."""
+        if max((seglen(a, b) for a, b in zip(self.m, self.m[1:])), default=0) <= step:
+            return
+        ll = [self.ll[0]]
+        for a, b in zip(self.ll, self.ll[1:]):
+            d = seglen(self.frame.to_m(a), self.frame.to_m(b))
+            n = int(d // step)
+            for i in range(1, n + 1):
+                t = i / (n + 1)
+                ll.append([round(a[0] + (b[0] - a[0]) * t, 7), round(a[1] + (b[1] - a[1]) * t, 7)])
+            ll.append(b)
+        self.ll = ll
+        self.m = dedupe([self.frame.to_m(q) for q in ll])
+        self.L = plen(self.m)
+        self.cum = [0.0]
+        for a, b in zip(self.m, self.m[1:]):
+            self.cum.append(self.cum[-1] + seglen(a, b))
+        self.h = [0.0] * len(self.m)
+
 
 def key(p):
     return (round(p[0], 6), round(p[1], 6))
@@ -500,6 +520,7 @@ def solve_heights(parts, ends):
     """
     bridges = [p for p in parts if p.lay['br']]
     for p in bridges:
+        p.densify()
         H = LEVEL_H * max(1, p.lay['ly'])
         p.h = [H] * len(p.m)
 
@@ -535,6 +556,8 @@ def solve_heights(parts, ends):
                 if not c:
                     break
                 _, q, q_at_end = c
+                if not any(q.h):
+                    q.densify()
                 chain.append((q, q_at_end))
                 total += q.L
                 cur, cur_node = q, (q.n0 if q_at_end else q.n1)
@@ -792,6 +815,9 @@ def emit(parts, ends, signals):
                 if extra:
                     f.update(extra)
                 add('mk', f, pts)
+            if lay['tu']:
+                line('tedge', left - 0.1)
+                line('tedge', right + 0.1)
             line('edge', left + EDGE_IN)
             line('edge', right - EDGE_IN)
             for i in range(1, N):
@@ -991,9 +1017,13 @@ def portal(p, fr, q, u, add):
         ring = [pt(a0, o0), pt(a1, o0), pt(a1, o1), pt(a0, o1), pt(a0, o0)]
         add('ex', {'id': f'{p.id}{sid}', 'g': ring, 'b': round(b, 2), 'h': round(h, 2), 'k': 'portal'}, ring)
     H = 5.6   # clear height at the crown
-    depth = 2.4
+    depth = 3.0
     slab('pL', 0, depth, -half - 1.2, -half + 0.3, 0, H + 1.2)
     slab('pR', 0, depth, half - 0.3, half + 1.2, 0, H + 1.2)
+    # a stretch of roof behind the portal so the entrance reads as a covered opening
+    slab('roof', depth, min(14.0, max(4.0, p.L * 0.3)), -half - 0.6, half + 0.6, H + 0.4, H + 1.0)
+    slab('wL', depth, min(14.0, max(4.0, p.L * 0.3)), -half - 0.6, -half + 0.1, 0, H + 0.4)
+    slab('wR', depth, min(14.0, max(4.0, p.L * 0.3)), half - 0.1, half + 0.6, 0, H + 0.4)
     steps = 9
     for i in range(steps):
         o0 = -half + 0.3 + (2 * half - 0.6) * i / steps

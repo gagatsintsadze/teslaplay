@@ -43,7 +43,7 @@ export function trafficOnLanes(features: { congestion: string; coords: LngLat[] 
     if (g.length < 2) continue;
     const a = offsetLine(g, g.map(() => left + 0.15));
     const b = offsetLine(g, g.map(() => right - 0.15));
-    out.push({ type: 'Feature', properties: { congestion: h.congestion }, geometry: { type: 'Polygon', coordinates: [[...a, ...b.reverse(), a[0]]] } });
+    out.push({ type: 'Feature', properties: { congestion: h.congestion, tu: r.tu }, geometry: { type: 'Polygon', coordinates: [[...a, ...b.reverse(), a[0]]] } });
   }
   return { type: 'FeatureCollection', features: out };
 }
