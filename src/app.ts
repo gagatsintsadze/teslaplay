@@ -363,9 +363,9 @@ export class App {
     const first = !this.state.fix;
     this.store.set({ fix });
     if (this.session) {
+      this.trackLane(fix); // before the snapshot, so lane guidance sees this fix's lane
       this.session.handleFix(fix);
       this.follow.setFix(fix, this.session.snap ? this.session.snap.d : null);
-      this.trackLane(fix);
     }
     if (this.roads) {
       this.updateXray();
