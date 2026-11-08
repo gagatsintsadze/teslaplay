@@ -100,7 +100,8 @@ function toRoute(rt: any, req: RouteRequest): RouteResult {
         const a = typeof m.bearing_before === 'number' && typeof m.bearing_after === 'number' ? angleDiff(m.bearing_before, m.bearing_after) : NaN;
         if (isFinite(a) && Math.sign(a) === Math.sign(angle)) angle = a;
       }
-      maneuvers.push({ coord: m.location as LngLat, type, angle, street: name || undefined, instruction: m.instruction, lanes });
+      const rb = m.type === 'roundabout' || m.type === 'rotary';
+      maneuvers.push({ coord: m.location as LngLat, type, angle, street: name || undefined, instruction: m.instruction, lanes, ...(rb ? { roundabout: true, exit: typeof m.exit === 'number' ? m.exit : undefined } : {}) });
     }
   }
   const r = buildRoute(coords, rt.distance, rt.duration, tolls, steps, req, maneuvers);

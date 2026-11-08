@@ -1,5 +1,5 @@
 import type { App } from './app';
-import { simplify, slice, sliceWith } from './core/geo';
+import { pointAt, simplify, slice, sliceWith } from './core/geo';
 import { shallowEqualArray } from './core/store';
 import type { MarkerSpec, RouteLine } from './map/engine';
 import { chargerMarker, cityLabel, pinMarker } from './map/markers';
@@ -61,6 +61,22 @@ export function bindMap(app: App) {
   let drawnAt = -1e9;
   // Live-traffic slow stretches of a route from distance `from` on, as drawable pieces.
   // Pieces of the drawn route with the lane-band width they run in (quantised to 0.5 m), from `from` on.
+  /** Lane-change marks from the plan: at each deadline where the recommended lane differs from the lane arrived in. */
+  const marks = (r: RouteResult) => {
+    const g = app.drawGeometry(r);
+    const out: { coord: LngLat; bearing: number; dir: 'left' | 'right'; d: number }[] = [];
+    const end = r.cum[r.cum.length - 1];
+    for (const st of g.plan) {
+      if (!st.allowed || st.recommended === st.from || !isFinite(st.mustBeInBy)) continue;
+      const sec = g.sections[st.section];
+      const d = Math.max(r.cum[sec.i0] + 5, Math.min(st.mustBeInBy, end - 5));
+      if (d < 20) continue;
+      const p = pointAt(g.coords, r.cum, d);
+      out.push({ coord: p.coord, bearing: p.bearing, dir: st.recommended < st.from ? 'left' : 'right', d });
+    }
+    return out;
+  };
+
   // Pieces also split where the road leaves or reaches the ground (bridges, ramps), carrying heights.
   const parts = (r: RouteResult, from = 0) => {
     const { coords, widths, heights } = app.drawGeometry(r);
@@ -99,12 +115,12 @@ export function bindMap(app: App) {
     if (s.navigating && s.navRoute) {
       const r = s.navRoute;
       const p = s.nav ? s.nav.progress : 0;
-      lines.push({ id: 'nav', coords: slice(app.drawCoords(r), r.cum, p, r.cum[r.cum.length - 1]), role: 'primary', parts: parts(r, p), traffic: slowParts(r, p) });
+      lines.push({ id: 'nav', coords: slice(app.drawCoords(r), r.cum, p, r.cum[r.cum.length - 1]), role: 'primary', parts: parts(r, p), traffic: slowParts(r, p), marks: marks(r).filter(k => k.d > p) });
       drawnAt = p;
     } else if (s.panel === 'planner') {
       s.routes.forEach((r, i) => { if (i !== s.routeIndex) lines.push({ id: r.id, coords: app.drawCoords(r), role: 'alternative', parts: parts(r) }); });
       const sel = s.routes[s.routeIndex];
-      if (sel) lines.push({ id: sel.id, coords: app.drawCoords(sel), role: 'primary', parts: parts(sel), traffic: slowParts(sel) });
+      if (sel) lines.push({ id: sel.id, coords: app.drawCoords(sel), role: 'primary', parts: parts(sel), traffic: slowParts(sel), marks: marks(sel) });
     }
     engine.setRoutes(lines);
   };

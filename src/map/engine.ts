@@ -17,7 +17,13 @@ export type RouteRole = 'primary' | 'alternative' | 'traveled';
  * `w`: width in metres of the lanes the car drives in along this piece (0/absent = default width).
  * A line may be split into `parts` with different widths; `coords` is always the whole line.
  */
-export interface RouteLine { id: string; coords: LngLat[]; role: RouteRole; parts?: { coords: LngLat[]; w: number; h?: number[] }[]; traffic?: { coords: LngLat[]; level: number; w?: number }[] }
+export interface RouteLine {
+  id: string; coords: LngLat[]; role: RouteRole;
+  parts?: { coords: LngLat[]; w: number; h?: number[] }[];
+  traffic?: { coords: LngLat[]; level: number; w?: number }[];
+  /** lane-change marks painted on the band: where to move over, and which way */
+  marks?: { coord: LngLat; bearing: number; dir: 'left' | 'right' }[];
+}
 
 export interface MarkerSpec {
   id: string;

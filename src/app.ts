@@ -22,6 +22,7 @@ import { OsmPlaces } from './services/osm';
 import { OsrmRouting } from './services/osrm';
 import { OsmSearch, type SearchService } from './services/search';
 import { RoadDetails } from './services/roads';
+import { laneLang, laneWords } from './nav/lanewords';
 import { laneOfFix, placeOnLanes, type LanePlacement } from './nav/laneroute';
 import { trafficOnLanes } from './nav/lanetraffic';
 import { Voice } from './services/voice';
@@ -73,6 +74,7 @@ export class App {
 
   constructor(public cfg: AppConfig) {
     this.store = new Store(initialState(cfg.demo));
+    this.voice.setLang(cfg.mapLang);
     const demo = cfg.demo;
     this.engine = demo
       ? new DemoEngine({ url: cfg.demoBackdropUrl, trafficUrl: cfg.demoBackdropUrl.startsWith('data:') ? undefined : 'demo/backdrop-traffic.jpg', bounds: DEMO_BOUNDS })
@@ -280,10 +282,12 @@ export class App {
       prompt = { dir: target < current ? 'left' : 'right', lanes: Math.abs(target - current), urgent: toTurn < 120 };
       const key = `${route.id}:${si}`;
       const said = this.lanePrompted.get(key) || 0;
-      const words = prompt.lanes === 1 ? `Move one lane ${prompt.dir}` : `Move ${prompt.lanes} lanes ${prompt.dir}`;
-      if (said === 0) { this.voice.say(`${words} for the turn.`); this.lanePrompted.set(key, 1); }
+      // spoken in the map language when the browser has such a voice, else in English
+      const w = laneWords(this.voice.spokenLang === laneLang(this.cfg.mapLang) ? this.cfg.mapLang : 'en');
+      const words = w.move(prompt.lanes, prompt.dir);
+      if (said === 0) { this.voice.say(w.forTurn(words)); this.lanePrompted.set(key, 1); }
       else if (said === 1 && toDeadline < 0) { this.voice.say(words); this.lanePrompted.set(key, 2); }
-      else if (said === 2 && prompt.urgent) { this.voice.say(`You cannot turn from this lane. ${words} now.`); this.lanePrompted.set(key, 3); }
+      else if (said === 2 && prompt.urgent) { this.voice.say(w.cannotTurn(words), true); this.lanePrompted.set(key, 3); }
     }
     return { turns: Array.from({ length: sec.count }, (_, k) => (turns[k] || 'none').split(';').filter((t) => t && t !== 'none')), allowed, recommended: st.recommended, current, toDeadline, prompt };
   }
@@ -325,16 +329,31 @@ export class App {
     let shift = 0;
     if (!fix.simulated && fix.heading !== null && (fix.accuracy || 99) <= 12) {
       const r = this.state.navRoute;
-      const placed = this.drawGeometry(r);
+      let placed = this.drawGeometry(r);
       const d = this.session.snap.d;
       let i = 0;
       while (i < r.cum.length - 1 && r.cum[i + 1] < d) i++;
       const here = laneOfFix(fix.coord, fix.heading, this.roads.lanesAt(fix.coord));
-      if (here && placed.lanes[i] >= 0 && placed.counts[i] === here.count) shift = (here.lane - placed.lanes[i]) * here.lw;
+      if (here && placed.lanes[i] >= 0 && placed.counts[i] === here.count) {
+        shift = (here.lane - placed.lanes[i]) * here.lw;
+        // Still on the first road of the route and the plan did not know the lane: once GPS has seen the
+        // same lane 3 times, plan again from that lane (the recommended lanes ahead may change), then
+        // measure the car against the new placement.
+        if (!this.startLanes.has(r.id) && placed.step[i] === 0 && shift !== 0 && this.laneSeen.shift === shift && this.laneSeen.n >= 2) {
+          this.startLanes.set(r.id, here.lane);
+          this.drawCache.delete(r.id);
+          placed = this.drawGeometry(r);
+          this.syncDisplayRoute();
+          shift = placed.lanes[i] >= 0 ? (here.lane - placed.lanes[i]) * here.lw : 0;
+        }
+      }
     }
     this.laneSeen = this.laneSeen.shift === shift ? { shift, n: this.laneSeen.n + 1 } : { shift, n: 1 };
     if (this.laneSeen.n >= 3 || shift === 0) this.follow.setLaneShift(shift);
   }
+
+  /** The lane the car was really in at the start of a route, once GPS has settled on one (re-plan input). */
+  private startLanes = new Map<string, number>();
 
   private drawCache = new Map<string, { v: number } & LanePlacement>();
   /** Route geometry on its lanes (nav/laneroute.ts), plus the lane-band width per vertex (0 = no lane data). */
@@ -343,7 +362,7 @@ export class App {
     const v = this.state.roadsVersion;
     const hit = this.drawCache.get(r.id);
     if (hit && hit.v === v) return hit;
-    const placed = placeOnLanes(r.coords, r.cum, r.maneuvers, this.roads);
+    const placed = placeOnLanes(r.coords, r.cum, r.maneuvers, this.roads, this.startLanes.get(r.id) ?? null);
     const entry = { v, ...placed };
     if (this.drawCache.size > 12) this.drawCache.clear();
     this.drawCache.set(r.id, entry);

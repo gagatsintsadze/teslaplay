@@ -57,6 +57,9 @@ export interface Maneuver {
   instruction?: string;
   /** Lanes approaching this maneuver, left to right: arrows painted on each, and whether it leads the right way. */
   lanes?: { dirs: string[]; valid: boolean; active?: boolean }[];
+  /** Roundabout entry: which exit to take (1 = first). */
+  exit?: number;
+  roundabout?: boolean;
 }
 
 /** A stretch of the route with moderate (2), heavy (3) or severe (4) congestion, by distance along it. */

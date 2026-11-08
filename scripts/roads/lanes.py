@@ -797,10 +797,15 @@ def turn_class(h_in, h_out):
 def lane_map(turns_in, n_in, n_out, t):
     """Which incoming lanes feed the turn, and where they land: [[from, to], ...]."""
     if turns_in:
-        want = {'left': r'left|reverse', 'uturn': r'reverse|left', 'right': r'right', 'through': r'through|none|^$'}[t]
+        want = {'left': r'left|reverse', 'uturn': r'reverse|left', 'right': r'right', 'through': r'through'}[t]
         src = [i for i, x in enumerate(turns_in) if re.search(want, x)]
-        if not src and t == 'through':
-            src = [i for i, x in enumerate(turns_in) if 'slight' in x]
+        if not src:
+            # explicitly marked lanes win; unmarked lanes ("none"/empty) only serve a turn when none is marked for it
+            unmarked = [i for i, x in enumerate(turns_in) if x in ('', 'none')]
+            if t == 'through':
+                src = unmarked or [i for i, x in enumerate(turns_in) if 'slight' in x]
+            elif len(unmarked) == len(turns_in):
+                src = unmarked
     else:
         src = []
     if not src:

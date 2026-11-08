@@ -165,8 +165,8 @@ export class OsmEngine implements MapEngine {
     map.on('style.load', () => this.decorateStyle());
     map.on('styleimagemissing', (e: any) => {
       const id: string = e && e.id;
-      if (!id || !id.startsWith('ta:') || map.hasImage(id)) return;
-      const img = arrowImage(turnSet(id.slice(3).split(';')), PALETTES[this.theme].marking);
+      if (!id || !(id.startsWith('ta:') || id.startsWith('tb:')) || map.hasImage(id)) return;
+      const img = arrowImage(turnSet(id.slice(3).split(';')), id.startsWith('tb:') ? '#ffffff' : PALETTES[this.theme].marking);
       if (img) map.addImage(id, img, { pixelRatio: 2 });
     });
     map.on('move', () => this.queueView());
@@ -216,6 +216,18 @@ export class OsmEngine implements MapEngine {
         id: 'tp-route-traffic', type: 'line', source: 'tp-route-traffic',
         layout: { 'line-join': 'round', 'line-cap': 'butt' },
         paint: { 'line-color': ['match', ['get', 'level'], 4, SLOW_COLORS[4], 3, SLOW_COLORS[3], SLOW_COLORS[2]], 'line-width': 6 },
+      }, map.getLayer('tp-route-chevrons') ? 'tp-route-chevrons' : before);
+    }
+    if (!map.getSource('tp-route-marks')) {
+      // Lane-change marks: a sideways arrow painted on the band where the plan wants the move made.
+      map.addSource('tp-route-marks', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.addLayer({
+        id: 'tp-route-marks', type: 'symbol', source: 'tp-route-marks', minzoom: 15.5,
+        layout: {
+          'icon-image': ['get', 'icon'], 'icon-rotate': ['get', 'rot'], 'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map',
+          'icon-allow-overlap': true, 'icon-ignore-placement': true, 'icon-size': metres(4.5 / 80, 0.3),
+        },
+        paint: { 'icon-opacity': 0.95 },
       }, map.getLayer('tp-route-chevrons') ? 'tp-route-chevrons' : before);
     }
 
@@ -484,6 +496,12 @@ export class OsmEngine implements MapEngine {
       map.addLayer(this.band, map.getLayer('tp-buildings') ? 'tp-buildings' : undefined);
     }
     if (this.band) this.band.setRuns(runs);
+    const marksSrc = map.getSource('tp-route-marks');
+    if (marksSrc) {
+      const mf: any[] = [];
+      for (const r of this.routes) for (const k of r.marks || []) mf.push({ type: 'Feature', properties: { icon: k.dir === 'left' ? 'tb:merge_to_left' : 'tb:merge_to_right', rot: k.bearing }, geometry: { type: 'Point', coordinates: k.coord } });
+      marksSrc.setData({ type: 'FeatureCollection', features: mf });
+    }
     const slow = map.getSource('tp-route-traffic');
     if (slow) {
       const p = colors.primary;

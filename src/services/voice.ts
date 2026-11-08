@@ -8,16 +8,29 @@ export class Voice {
   private ctx: AudioContext | null = null;
   private lang = 'en';
 
-  constructor() {
+  constructor(lang = 'en') {
+    this.lang = lang.slice(0, 2).toLowerCase() || 'en';
     if ('speechSynthesis' in window) {
-      const pick = () => {
-        const voices = speechSynthesis.getVoices();
-        const want = voices.filter((v) => v.lang.toLowerCase().startsWith(this.lang));
-        this.voice = want.find((v) => /natural|premium|enhanced|google/i.test(v.name)) || want[0] || null;
-      };
-      pick();
-      speechSynthesis.addEventListener?.('voiceschanged', pick);
+      this.pick();
+      speechSynthesis.addEventListener?.('voiceschanged', () => this.pick());
     }
+  }
+
+  /** A voice for the wanted language; English when the browser has none for it (Tesla has no Georgian voice). */
+  private pick() {
+    const voices = speechSynthesis.getVoices();
+    const want = voices.filter((v) => v.lang.toLowerCase().startsWith(this.lang));
+    const en = this.lang === 'en' ? [] : voices.filter((v) => v.lang.toLowerCase().startsWith('en'));
+    const best = (list: SpeechSynthesisVoice[]) => list.find((v) => /natural|premium|enhanced|google/i.test(v.name)) || list[0] || null;
+    this.voice = best(want) || best(en);
+  }
+
+  /** Language of the voice picked (BCP-47 prefix), 'none' when prompts fall back to the chime. */
+  get spokenLang(): string { return this.voice ? this.voice.lang.slice(0, 2).toLowerCase() : 'none'; }
+
+  setLang(lang: string) {
+    this.lang = lang.slice(0, 2).toLowerCase() || 'en';
+    if ('speechSynthesis' in window) this.pick();
   }
 
   get canSpeak() { return !!this.voice; }

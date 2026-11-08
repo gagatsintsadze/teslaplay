@@ -36,12 +36,29 @@ export interface PlanStep {
   mustBeInBy: number;
   /** index into maneuvers this step prepares for, or -1 */
   maneuver: number;
+  /** the lane the car arrives on this section in (before any change) */
+  from: number;
 }
 
 const LANE_LEAD_S = 7;      // seconds of travel per lane change
 const LANE_LEAD_MIN = 150;  // metres per lane change, at least
+const EXIT_LEAD_MIN = 600;  // on motorways/trunks: be in the exit lane this far ahead
 
 const turnsOf = (r: LaneRecord, forward: boolean) => (forward ? r.tf : r.tb);
+
+/**
+ * Lanes whose arrows serve a turn. Explicitly marked lanes win; unmarked lanes ("none"/empty) only count when
+ * no lane is marked for that turn, and a slight turn is accepted for "through" as a last resort.
+ */
+export function lanesForTurn(turns: string[], t: 'left' | 'right' | 'through'): number[] {
+  const pick = (re: RegExp) => turns.map((x, i) => (re.test(x) ? i : -1)).filter((i) => i >= 0);
+  const explicit = pick(t === 'left' ? /left|reverse/ : t === 'right' ? /right/ : /through/);
+  if (explicit.length) return explicit;
+  const unmarked = pick(/^(none)?$/);
+  if (t === 'through') return unmarked.length ? unmarked : pick(/slight/);
+  // a turn with no marked lane: an unmarked lane may still allow it, but only if every lane is unmarked
+  return unmarked.length === turns.length ? unmarked : [];
+}
 
 /** The junction connection from `sec` into `next`, when the pipeline recorded one. */
 function connection(sec: Section, next: Section | undefined): LaneConnection | null {
@@ -60,24 +77,32 @@ export function allowedLanes(m: Maneuver, sec: Section, next?: Section): number[
   if (n <= 1) return null;
   const left = /left/.test(m.type) || m.type === 'uturn';
   const right = /right/.test(m.type);
+  if (m.roundabout) {
+    // Entering a roundabout: first exit from the right-hand lane, the last exits (or going round) from the left, else any.
+    if (m.exit === 1) return notBus(sec, [n - 1]);
+    if ((m.exit !== undefined && m.exit >= 3) || left) return notBus(sec, [0]);
+    return null;
+  }
   const cn = connection(sec, next);
-  if (cn && cn.m.length) {
+  // The recorded connection is trusted only when the pipeline saw the same kind of turn the router did:
+  // a shallow junction can be classed "through" by angle while the router (and the arrows) call it a left.
+  const agrees = cn && (left ? cn.t === 'left' || cn.t === 'uturn' : right ? cn.t === 'right' : cn.t === 'through');
+  if (cn && cn.m.length && agrees) {
     const src = Array.from(new Set(cn.m.map(([a]) => a))).sort((a, b) => a - b);
     if (src.length < n) return notBus(sec, src);
     if (!left && !right) return null;
+  }
+  const turns = turnsOf(sec.rec, sec.forward);
+  if (turns) {
+    const idx = lanesForTurn(turns, left ? 'left' : right ? 'right' : 'through');
+    if (idx.length && idx.length < n) return notBus(sec, idx);
+    if (idx.length === n) return null;
+    // arrows exist but none match (e.g. a slight turn tagged as "through"): try the router's lane flags, then the side rule
   }
   if (m.lanes && m.lanes.length === n) {
     const valid = m.lanes.map((l, i) => (l.valid ? i : -1)).filter((i) => i >= 0);
     if (valid.length && valid.length < n) return notBus(sec, valid);
     if (valid.length === n) return null;
-  }
-  const turns = turnsOf(sec.rec, sec.forward);
-  if (turns) {
-    const want = left ? /left|reverse/ : right ? /right/ : /through|none|^$/;
-    const idx = turns.map((t, i) => (want.test(t) ? i : -1)).filter((i) => i >= 0);
-    if (idx.length && idx.length < n) return notBus(sec, idx);
-    if (idx.length === n) return null;
-    // arrows exist but none match (e.g. a slight turn tagged as "through"): fall through to the side rule
   }
   if (left) return [0];
   if (right) return [n - 1];
@@ -117,15 +142,18 @@ function preferredLane(sec: Section): number {
 /** Where the car lands on the next section after a manoeuvre, given its lane before it. */
 function landingLane(m: Maneuver | null, from: Section, lane: number, to: Section): number {
   const cn = connection(from, to);
-  if (cn && cn.m.length) {
+  const left = !!m && (/left/.test(m.type) || m.type === 'uturn');
+  const right = !!m && /right/.test(m.type);
+  const agrees = !cn || !m || (left ? cn.t === 'left' || cn.t === 'uturn' : right ? cn.t === 'right' : cn.t === 'through');
+  if (cn && cn.m.length && agrees) {
     const hit = cn.m.find(([a]) => a === lane);
     if (hit) return Math.min(to.count - 1, hit[1]);
     const nearest = cn.m.reduce((best, pair) => (Math.abs(pair[0] - lane) < Math.abs(best[0] - lane) ? pair : best), cn.m[0]);
     return Math.min(to.count - 1, nearest[1]);
   }
   if (!m) return to.count === from.count ? lane : Math.max(0, Math.min(to.count - 1, Math.round((lane * (to.count - 1)) / Math.max(1, from.count - 1))));
-  if (/left/.test(m.type) || m.type === 'uturn') return 0;
-  if (/right/.test(m.type)) return to.count - 1;
+  if (left) return 0;
+  if (right) return to.count - 1;
   if (from.count === to.count) return lane;
   // straight on with a different lane count: keep the position scaled from the left
   return Math.max(0, Math.min(to.count - 1, Math.round((lane * (to.count - 1)) / Math.max(1, from.count - 1))));
@@ -182,12 +210,13 @@ export function planLanes(sections: Section[], cum: number[], maneuvers: Maneuve
     if (m && allowed) {
       const toCross = Math.abs(recommended - lane);
       const vms = planSpeed(sec) / 3.6;
-      const lead = Math.max(LANE_LEAD_MIN, LANE_LEAD_S * vms) * Math.max(1, toCross);
+      const fast = /motorway|trunk/.test(sec.rec.c);
+      const lead = Math.max(fast ? EXIT_LEAD_MIN : LANE_LEAD_MIN, LANE_LEAD_S * vms) * Math.max(1, toCross);
       mustBeInBy = m.at - lead;
       // a solid line on this section forbids the change: be in the lane before the section starts
       if (toCross && !changeAllowed(sec, lane, recommended)) mustBeInBy = Math.min(mustBeInBy, cum[sec.i0]);
     }
-    steps.push({ section: s, allowed, recommended, mustBeInBy, maneuver: mi });
+    steps.push({ section: s, allowed, recommended, mustBeInBy, maneuver: mi, from: lane });
     // carry the lane into the next section
     const next = sections[s + 1];
     if (next) lane = landingLane(m && m.at <= cum[next.i0] + 1 ? m : null, sec, recommended, next);

@@ -1,3 +1,4 @@
+import { laneWords } from '../nav/lanewords';
 import { laneSvg, turnSet, type TurnDir } from '../map/arrows';
 import type { App } from '../app';
 import { h, mount, setText, toggleClass } from '../core/dom';
@@ -125,7 +126,7 @@ export function mountNavHud(app: App, hud: HTMLElement) {
       lanePrompt.dataset.sig = prSig;
       toggleClass(lanePrompt, 'hidden', !pr);
       toggleClass(lanePrompt, 'urgent', !!pr && pr.urgent);
-      if (pr) setText(lanePrompt, `${pr.dir === 'left' ? '←' : '→'} ${pr.urgent ? 'Wrong lane — ' : ''}Move ${pr.lanes === 1 ? 'one lane' : `${pr.lanes} lanes`} ${pr.dir}`);
+      if (pr) { const w = laneWords(app.cfg.mapLang); setText(lanePrompt, `${pr.dir === 'left' ? '←' : '→'} ${pr.urgent ? `${w.wrongLane} — ` : ''}${w.move(pr.lanes, pr.dir)}`); }
     }
     const [dv, du] = distanceParts(n.distToManeuver);
     setText(distV, dv);
