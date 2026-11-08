@@ -22,7 +22,7 @@ const MATCH_M = 16;      // how far a route vertex may be from a reference line 
 const LEAD_M = 180;      // start moving into the turn lanes this far before the manoeuvre
 const BLEND_M = 90;      // lane changes are spread over this distance
 
-export interface LanePlacement { coords: LngLat[]; widths: number[] }
+export interface LanePlacement { coords: LngLat[]; widths: number[]; /** chosen lane per vertex (0 = leftmost of the direction of travel), -1 where unmatched */ lanes: number[]; /** lanes available in the direction of travel per vertex */ counts: number[] }
 
 interface Match { rec: LaneRecord; forward: boolean; signed: number; d: number }
 
@@ -95,6 +95,8 @@ export function placeOnLanes(coords: LngLat[], cum: number[], maneuvers: Maneuve
   const n = coords.length;
   const widths = new Array<number>(n).fill(0);
   const offs = new Array<number>(n).fill(0);
+  const lanes = new Array<number>(n).fill(-1);
+  const counts = new Array<number>(n).fill(0);
   const matches: (Match | null)[] = new Array(n).fill(null);
   const target: (number | null)[] = new Array(n).fill(null);
   // Which manoeuvre each vertex is approaching (for its lane choice).
@@ -118,6 +120,8 @@ export function placeOnLanes(coords: LngLat[], cum: number[], maneuvers: Maneuve
     const k = t === null ? centres.length - 1 : Math.max(0, Math.min(centres.length - 1, t)); // default: the right-hand lane
     offs[i] = centres[k] - m.signed;
     widths[i] = m.rec.lw;
+    lanes[i] = k;
+    counts[i] = centres.length;
   }
   // Blend lane changes: vertices within BLEND_M before a change ease towards the new lanes.
   const rawO = offs.slice(), rawW = widths.slice();
@@ -155,5 +159,20 @@ export function placeOnLanes(coords: LngLat[], cum: number[], maneuvers: Maneuve
     const miter = Math.min(2.5, 1 / Math.max(0.2, Math.cos(toRad(turn / 2))));
     out[i] = destination(coords[i], normalize360(b1 + turn / 2 + 90), o * miter);
   }
-  return { coords: out, widths };
+  return { coords: out, widths, lanes, counts };
+}
+
+/**
+ * Which lane a GPS fix is in (0 = leftmost of the direction of travel), from its lateral offset on the
+ * nearest lane record; null when no record matches. Used to let the car drift to the lane it is really
+ * in, instead of sitting on the recommended lane.
+ */
+export function laneOfFix(p: LngLat, heading: number, recs: LaneRecord[]): { lane: number; count: number; lw: number } | null {
+  const m = nearest(p, heading, recs);
+  if (!m) return null;
+  const centres = laneCentres(m.rec, m.forward);
+  if (!centres.length) return null;
+  const k = Math.round((m.signed - centres[0]) / m.rec.lw);
+  if (k < -1 || k > centres.length) return null; // on the pavement / the other carriageway: not a lane
+  return { lane: Math.max(0, Math.min(centres.length - 1, k)), count: centres.length, lw: m.rec.lw };
 }

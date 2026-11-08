@@ -56,6 +56,11 @@ export class FollowController {
     this.kick();
   }
 
+  /** Sideways shift of the car from the drawn route line, metres (right positive): the lane it is really in. */
+  private laneShift = 0;
+  private laneShiftTarget = 0;
+  setLaneShift(m: number) { this.laneShiftTarget = m; this.kick(); }
+
   setDisplayCoords(coords: LngLat[] | null) { this.shown = coords && this.route && coords.length === this.route.coords.length ? coords : null; }
 
   setNavigation(route: RouteResult | null) {
@@ -63,6 +68,7 @@ export class FollowController {
     this.shown = null;
     this.navigating = !!route;
     if (route) { this.alongFrom = this.alongTo = 0; }
+    this.laneShift = this.laneShiftTarget = 0;
     this.kick();
   }
 
@@ -130,8 +136,9 @@ export class FollowController {
       const line = this.shown || this.route.coords;
       const here = pointAt(line, this.route.cum, d);
       const ahead = pointAt(line, this.route.cum, d + 12);
-      this.disp = here.coord;
       target = bearing(here.coord, ahead.coord);
+      this.laneShift += (this.laneShiftTarget - this.laneShift) * 0.06;
+      this.disp = Math.abs(this.laneShift) > 0.05 ? destination(here.coord, target + 90, this.laneShift) : here.coord;
     } else if (this.from && this.to) {
       this.disp = lerp(this.from, this.to, t);
       if (fix.heading !== null) target = fix.heading;

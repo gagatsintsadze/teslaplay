@@ -22,7 +22,7 @@ import { OsmPlaces } from './services/osm';
 import { OsrmRouting } from './services/osrm';
 import { OsmSearch, type SearchService } from './services/search';
 import { RoadDetails } from './services/roads';
-import { placeOnLanes } from './nav/laneroute';
+import { laneOfFix, placeOnLanes } from './nav/laneroute';
 import { Voice } from './services/voice';
 import { WeatherService } from './services/weather';
 import { type AppState, initialState } from './state';
@@ -226,10 +226,31 @@ export class App {
     this.engine.setRoadDetails(roads.scene(keys));
   }
 
-  private drawCache = new Map<string, { v: number; coords: LngLat[]; widths: number[] }>();
+  private laneSeen: { shift: number; n: number } = { shift: 0, n: 0 };
+  /**
+   * The car is drawn on the recommended lane; when GPS says it is really in another lane of the same
+   * road for 3 fixes running (and the fix is good enough to tell lanes apart), it moves over there.
+   */
+  private trackLane(fix: Fix) {
+    if (!this.session || !this.roads || !this.state.navRoute || !this.session.snap) return;
+    let shift = 0;
+    if (!fix.simulated && fix.heading !== null && (fix.accuracy || 99) <= 12) {
+      const r = this.state.navRoute;
+      const placed = this.drawGeometry(r);
+      const d = this.session.snap.d;
+      let i = 0;
+      while (i < r.cum.length - 1 && r.cum[i + 1] < d) i++;
+      const here = laneOfFix(fix.coord, fix.heading, this.roads.lanesAt(fix.coord));
+      if (here && placed.lanes[i] >= 0 && placed.counts[i] === here.count) shift = (here.lane - placed.lanes[i]) * here.lw;
+    }
+    this.laneSeen = this.laneSeen.shift === shift ? { shift, n: this.laneSeen.n + 1 } : { shift, n: 1 };
+    if (this.laneSeen.n >= 3 || shift === 0) this.follow.setLaneShift(shift);
+  }
+
+  private drawCache = new Map<string, { v: number; coords: LngLat[]; widths: number[]; lanes: number[]; counts: number[] }>();
   /** Route geometry on its lanes (nav/laneroute.ts), plus the lane-band width per vertex (0 = no lane data). */
-  drawGeometry(r: RouteResult): { coords: LngLat[]; widths: number[] } {
-    if (!this.roads) return { coords: r.coords, widths: [] };
+  drawGeometry(r: RouteResult): { coords: LngLat[]; widths: number[]; lanes: number[]; counts: number[] } {
+    if (!this.roads) return { coords: r.coords, widths: [], lanes: [], counts: [] };
     const v = this.state.roadsVersion;
     const hit = this.drawCache.get(r.id);
     if (hit && hit.v === v) return hit;
@@ -255,6 +276,7 @@ export class App {
     if (this.session) {
       this.session.handleFix(fix);
       this.follow.setFix(fix, this.session.snap ? this.session.snap.d : null);
+      this.trackLane(fix);
     } else {
       this.follow.setFix(fix, null);
     }
