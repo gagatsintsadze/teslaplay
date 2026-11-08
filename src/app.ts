@@ -23,6 +23,7 @@ import { OsrmRouting } from './services/osrm';
 import { OsmSearch, type SearchService } from './services/search';
 import { RoadDetails } from './services/roads';
 import { laneOfFix, placeOnLanes } from './nav/laneroute';
+import { trafficOnLanes } from './nav/lanetraffic';
 import { Voice } from './services/voice';
 import { WeatherService } from './services/weather';
 import { type AppState, initialState } from './state';
@@ -126,7 +127,8 @@ export class App {
       this.roadsForView(v.center, v.zoom);
     });
     if (this.roads && this.engine.setRoadDetails) {
-      this.roads.onTile(() => { this.renderRoads(true); this.store.set({ roadsVersion: this.state.roadsVersion + 1 }); });
+      this.roads.onTile(() => { this.renderRoads(true); this.store.set({ roadsVersion: this.state.roadsVersion + 1 }); this.paintTrafficLanes(); });
+      if ('onTrafficTiles' in this.engine) this.engine.onTrafficTiles = () => this.paintTrafficLanes();
       // The puck glides along the drawn (lane-aligned) line, not the road's centre line.
       this.store.select((s) => [s.navRoute, s.roadsVersion], () => { if (this.state.navRoute) this.follow.setDisplayCoords(this.drawCoords(this.state.navRoute)); }, { equals: shallowEqualArray });
     }
@@ -224,6 +226,17 @@ export class App {
     if (!force && sig === this.roadsKey) return;
     this.roadsKey = sig;
     this.engine.setRoadDetails(roads.scene(keys));
+  }
+
+  private trafficLanesTimer = 0;
+  /** Paint live traffic onto the lane model (throttled; see nav/lanetraffic.ts). */
+  private paintTrafficLanes() {
+    if (this.trafficLanesTimer || !this.roads || !this.engine.trafficFeatures || !this.engine.setTrafficLanes) return;
+    this.trafficLanesTimer = window.setTimeout(() => {
+      this.trafficLanesTimer = 0;
+      const feats = this.engine.trafficFeatures!();
+      this.engine.setTrafficLanes!(feats.length ? trafficOnLanes(feats, this.roads!) : { type: 'FeatureCollection', features: [] });
+    }, 400);
   }
 
   private laneSeen: { shift: number; n: number } = { shift: 0, n: 0 };
@@ -781,6 +794,8 @@ export class App {
   }
 
   setSimSpeed(x: number) { this.location.setSimSpeed(x); this.store.set({ simSpeed: x }); }
+  /** Jump the simulated drive to a fraction (0–1) of the route. */
+  setSimProgress(frac: number) { this.location.setSimProgress(frac); }
   toggleMute() {
     const muted = !this.state.muted;
     storage.set('muted', muted);

@@ -88,6 +88,7 @@ export class LocationService {
     this.sim = new Simulator(route, speedMultiplier, (f) => this.emit(f));
   }
   setSimSpeed(x: number) { if (this.sim) this.sim.multiplier = x; }
+  setSimProgress(frac: number) { if (this.sim) this.sim.jump(frac); }
   stopSimulation() { if (this.sim) { this.sim.stop(); this.sim = null; } }
 }
 
@@ -105,6 +106,15 @@ class Simulator {
   }
 
   stop() { clearInterval(this.timer); }
+
+  /** Teleport to a fraction of the route (the drive carries on from there). */
+  jump(frac: number) {
+    const total = this.route.cum[this.route.cum.length - 1];
+    this.d = Math.max(0, Math.min(total, total * frac));
+    this.v = 0;
+    this.heading = pointAt(this.route.coords, this.route.cum, this.d).bearing;
+    this.tick(0);
+  }
 
   private targetSpeed(d: number): number {
     const r = this.route;

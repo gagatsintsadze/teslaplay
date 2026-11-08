@@ -105,6 +105,27 @@ export class OsmEngine implements MapEngine {
   private trafficTimer = 0;
   /** Called when Mapbox refuses the traffic tiles (bad or restricted token). */
   onTrafficError: ((message: string) => void) | null = null;
+  /** Fires when traffic tiles arrive or the view settles — time to repaint traffic onto the lanes. */
+  onTrafficTiles: (() => void) | null = null;
+
+  /** Mapbox traffic features in view (congestion + coordinates in the direction of travel), street zooms only. */
+  trafficFeatures(): { congestion: string; coords: LngLat[] }[] {
+    const map = this.map;
+    if (!map || !this.trafficOn || map.getZoom() < 15 || !map.getSource('tp-traffic')) return [];
+    const out: { congestion: string; coords: LngLat[] }[] = [];
+    for (const f of map.querySourceFeatures('tp-traffic', { sourceLayer: 'traffic' })) {
+      const g = f.geometry;
+      const lines: LngLat[][] = g.type === 'LineString' ? [g.coordinates] : g.type === 'MultiLineString' ? g.coordinates : [];
+      for (const coords of lines) out.push({ congestion: f.properties.congestion, coords });
+    }
+    return out;
+  }
+
+  /** Congestion painted onto the lanes of the direction it applies to (polygons from app → nav/lanetraffic.ts). */
+  setTrafficLanes(fc: any) {
+    const src = this.map && this.map.getSource('tp-traffic-lanes');
+    if (src) src.setData(fc);
+  }
 
   constructor(private lang = 'en_US', private mapboxToken = '') {}
 
@@ -257,14 +278,26 @@ export class OsmEngine implements MapEngine {
         paint: {
           'line-color': ['match', ['get', 'congestion'], 'low', '#30d158', 'moderate', SLOW_COLORS[2], 'heavy', SLOW_COLORS[3], SLOW_COLORS[4]],
           // At street level free-flowing traffic turns into a light tint so lane markings show through.
-          'line-opacity': ['interpolate', ['linear'], ['zoom'], 16, ['match', ['get', 'congestion'], 'low', 0.7, 0.95], 17.5, ['match', ['get', 'congestion'], 'low', 0.32, 0.75]],
+          // At street zooms traffic is painted onto the lane model instead (tp-traffic-lanes), where the
+          // lane model is loaded; the raw lines fade out there.
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 15, ['match', ['get', 'congestion'], 'low', 0.7, 0.95], 16, 0],
           'line-width': byZoom(0.42, 1.6),
-          // Traffic lines are directional: offset to the right-hand lane of each direction.
-          'line-offset': byZoom(0.25, 1.2),
         },
       }, before);
+      map.addSource('tp-traffic-lanes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      map.addLayer({
+        id: 'tp-traffic-lanes', type: 'fill', source: 'tp-traffic-lanes', minzoom: 15,
+        paint: {
+          'fill-color': ['match', ['get', 'congestion'], 'low', '#30d158', 'moderate', SLOW_COLORS[2], 'heavy', SLOW_COLORS[3], SLOW_COLORS[4]],
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 15, 0, 16, ['match', ['get', 'congestion'], 'low', 0.28, 0.55]],
+          'fill-antialias': false,
+        },
+      }, map.getLayer('tp-mk-edge') ? 'tp-mk-edge' : before);
+      map.on('sourcedata', (e: any) => { if (e.sourceId === 'tp-traffic' && e.isSourceLoaded && this.onTrafficTiles) this.onTrafficTiles(); });
+      map.on('moveend', () => { if (this.onTrafficTiles) this.onTrafficTiles(); });
     }
     if (map.getLayer('tp-traffic')) map.setLayoutProperty('tp-traffic', 'visibility', this.trafficOn ? 'visible' : 'none');
+    if (map.getLayer('tp-traffic-lanes')) map.setLayoutProperty('tp-traffic-lanes', 'visibility', this.trafficOn ? 'visible' : 'none');
     if (this.trafficOn && !this.trafficTimer) {
       this.trafficTimer = window.setInterval(() => {
         const src = this.map && this.map.getSource('tp-traffic');

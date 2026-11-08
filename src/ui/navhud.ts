@@ -145,8 +145,12 @@ export function mountNavHud(app: App, hud: HTMLElement) {
       stopRow.style.display = '';
     } else stopRow.style.display = 'none';
     if (s.simulating) {
+      const jump = h('input.sim-jump', { type: 'range', min: '0', max: '100', step: '1', value: String(Math.round(s.nav && s.navRoute ? (s.nav.progress / Math.max(1, s.navRoute.distance)) * 100 : 0)), 'aria-label': 'Jump to a point of the route' }) as HTMLInputElement;
+      jump.addEventListener('change', () => app.setSimProgress(Number(jump.value) / 100));
       mount(simRow, h('span', null, 'Simulated drive'),
-        segmented('sim-speed', s.simSpeed, [1, 2, 4, 8].map((x) => [x, `${x}×`] as [number, string]), (x) => app.setSimSpeed(x), { style: { minWidth: '12rem' } }));
+        segmented('sim-speed', s.simSpeed, [1, 2, 4, 8].map((x) => [x, `${x}×`] as [number, string]), (x) => app.setSimSpeed(x), { style: { minWidth: '12rem' } }),
+        h('label.sim-jump-row', null, h('span', null, 'Jump to'), jump, h('span.sim-jump-val', null, `${jump.value}%`)));
+      jump.addEventListener('input', () => { (jump.nextElementSibling as HTMLElement).textContent = `${jump.value}%`; });
       simRow.style.display = '';
     } else simRow.style.display = 'none';
   }, { equals: eq });
