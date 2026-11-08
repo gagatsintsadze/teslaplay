@@ -6,7 +6,7 @@
  * 3-D scene. Strips of a structure the car is about to drive under are drawn translucent.
  */
 
-export interface Strip { id: string; s: string; pts: number[][]; color: [number, number, number] }
+export interface Strip { id: string; s: string; pts: number[][]; color: [number, number, number]; /** 1 = opaque; translucent strips are drawn last without writing depth */ alpha?: number }
 
 const VS = `
 attribute vec3 aPos; attribute vec4 aCol;
@@ -69,7 +69,8 @@ export class MeshLayer {
     if (first) { const c = MC.fromLngLat({ lng: first.pts[0][0], lat: first.pts[0][1] }, first.pts[0][2]); this.origin = [c.x, c.y, c.z]; }
     const [ox, oy, oz] = this.origin;
     for (const st of this.strips) {
-      const out = this.xray.has(st.s) ? seeThrough : solid;
+      const out = this.xray.has(st.s) || (st.alpha !== undefined && st.alpha < 1) ? seeThrough : solid;
+      const alpha = this.xray.has(st.s) ? 0.3 : st.alpha ?? 1;
       const n = st.pts.length;
       if (n < 4) continue;
       const m = st.pts.map((p) => { const c = MC.fromLngLat({ lng: p[0], lat: p[1] }, p[2]); return [c.x - ox, c.y - oy, c.z - oz]; });
@@ -83,7 +84,7 @@ export class MeshLayer {
         const len = Math.hypot(nx, ny, nz) || 1;
         const up = Math.abs(nz / len);                    // 1 = flat top, 0 = vertical wall
         const shade = 0.62 + 0.38 * up;
-        for (const v of [a, bb, c]) out.push(v[0], v[1], v[2], r * shade, g * shade, b * shade, 1);
+        for (const v of [a, bb, c]) out.push(v[0], v[1], v[2], r * shade, g * shade, b * shade, alpha);
       }
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
@@ -115,7 +116,7 @@ export class MeshLayer {
     };
     gl.depthMask(true);
     if (this.count) draw(this.vbo, this.count, 1);
-    if (this.xcount) { gl.depthMask(false); draw(this.xvbo!, this.xcount, 0.3); gl.depthMask(true); }
+    if (this.xcount) { gl.depthMask(false); draw(this.xvbo!, this.xcount, 1); gl.depthMask(true); }
   }
 }
 

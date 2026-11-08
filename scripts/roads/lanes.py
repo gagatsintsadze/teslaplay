@@ -801,6 +801,8 @@ def emit(parts, ends, signals):
         # asphalt between the cuts
         ring = [fr.to_ll(q) for q in ribbon(core, left, right)]
         add('surf', {'id': p.id, 'g': ring, 'c': rec['c'], 'br': rec['br'], 'tu': rec['tu'], 'ly': lay['ly']}, ring)
+        if lay['tu']:
+            emit_tunnel(p, rec, add)
         # markings (clear of the junction by 0.3 m)
         mk_core = sub(m, p.cs + 0.3, p.L - p.ce - 0.3)
         if mk_core is not None:
@@ -815,9 +817,6 @@ def emit(parts, ends, signals):
                 if extra:
                     f.update(extra)
                 add('mk', f, pts)
-            if lay['tu']:
-                line('tedge', left - 0.1)
-                line('tedge', right + 0.1)
             line('edge', left + EDGE_IN)
             line('edge', right - EDGE_IN)
             for i in range(1, N):
@@ -1002,35 +1001,65 @@ def stop(p, s, off_a, off_b, kind, add):
     add('mk', {'id': f'{p.id}{kind}{int(s)}', 'k': kind, 'g': pts, 'ly': p.lay['ly'], 'br': 1 if p.lay['br'] else 0}, pts)
 
 
+TUNNEL_WALL = 3.4     # vertical wall height of the tube, metres
+TUNNEL_CROWN = 5.9    # height at the crown
+
+
+def tunnel_profile(half):
+    """Cross-section of the tube, left → right: (lateral offset from the carriageway centre, height)."""
+    hw = half + 0.7
+    return [(-hw, 0.0), (-hw, TUNNEL_WALL), (-hw * 0.82, TUNNEL_CROWN - 1.0), (-hw * 0.45, TUNNEL_CROWN - 0.25), (0.0, TUNNEL_CROWN),
+            (hw * 0.45, TUNNEL_CROWN - 0.25), (hw * 0.82, TUNNEL_CROWN - 1.0), (hw, TUNNEL_WALL), (hw, 0.0)]
+
+
+def emit_tunnel(p, rec, add):
+    """A tunnel as a see-through tube over the road: walls and an arched roof, as 3-D strips."""
+    lay = p.lay
+    fr = p.frame
+    N = lay['f'] + lay['b']
+    half = N * lay['lw'] / 2
+    cx = lay['l'] + half                      # carriageway centre offset from the way
+    prof = tunnel_profile(half)
+    sm = samples(p, 0.0, p.L, 6.0)
+    if len(sm) < 2:
+        return
+    for k in range(len(prof) - 1):
+        (o0, z0), (o1, z1) = prof[k], prof[k + 1]
+        pts = []
+        for sd, q, n in sm:
+            for o, z in ((o0, z0), (o1, z1)):
+                ll = fr.to_ll((q[0] + n[0] * (cx + o), q[1] + n[1] * (cx + o)))
+                pts.append([ll[0], ll[1], round(z, 2)])
+        add('m3', {'id': f'{p.id}T{k}', 'k': 'tube', 'q': pts, 's': p.id}, [[x[0], x[1]] for x in pts])
+
+
 def portal(p, fr, q, u, add):
-    """Tunnel mouth: two posts and a stepped arch, as fill-extrusion slabs (base b, top h)."""
+    """Tunnel mouth: a concrete frame around the tube's opening (front face + a 1.5 m deep rim)."""
     lay = p.lay
     N = lay['f'] + lay['b']
-    half = N * lay['lw'] / 2 + 0.6
-    cx = lay['l'] + N * lay['lw'] / 2   # carriageway centre offset from the way
-    n = (u[1], -u[0])                    # right normal
+    half = N * lay['lw'] / 2
+    cx = lay['l'] + half
+    n = (u[1], -u[0])
+    inner = tunnel_profile(half)
+    outer = [(o * 1.0 + (0.9 if o > 0 else -0.9 if o < 0 else 0.0), z + (0.9 if z > 0.1 else 0.0)) for o, z in inner]
+    outer[0] = (outer[0][0], 0.0)
+    outer[-1] = (outer[-1][0], 0.0)
 
-    def pt(along, off):
-        return fr.to_ll((q[0] + u[0] * along + n[0] * (cx + off), q[1] + u[1] * along + n[1] * (cx + off)))
-
-    def slab(sid, a0, a1, o0, o1, b, h):
-        ring = [pt(a0, o0), pt(a1, o0), pt(a1, o1), pt(a0, o1), pt(a0, o0)]
-        add('ex', {'id': f'{p.id}{sid}', 'g': ring, 'b': round(b, 2), 'h': round(h, 2), 'k': 'portal'}, ring)
-    H = 5.6   # clear height at the crown
-    depth = 3.0
-    slab('pL', 0, depth, -half - 1.2, -half + 0.3, 0, H + 1.2)
-    slab('pR', 0, depth, half - 0.3, half + 1.2, 0, H + 1.2)
-    # a stretch of roof behind the portal so the entrance reads as a covered opening
-    slab('roof', depth, min(14.0, max(4.0, p.L * 0.3)), -half - 0.6, half + 0.6, H + 0.4, H + 1.0)
-    slab('wL', depth, min(14.0, max(4.0, p.L * 0.3)), -half - 0.6, -half + 0.1, 0, H + 0.4)
-    slab('wR', depth, min(14.0, max(4.0, p.L * 0.3)), half - 0.1, half + 0.6, 0, H + 0.4)
-    steps = 9
-    for i in range(steps):
-        o0 = -half + 0.3 + (2 * half - 0.6) * i / steps
-        o1 = -half + 0.3 + (2 * half - 0.6) * (i + 1) / steps
-        mid = (o0 + o1) / 2 / (half - 0.3)
-        base = max(2.6, H * math.sqrt(max(0.0, 1 - mid * mid)))
-        slab(f'a{i}', 0, depth, o0 - 0.02, o1 + 0.02, base, H + 1.2)
+    def pt(along, o, z):
+        ll = fr.to_ll((q[0] + u[0] * along + n[0] * (cx + o), q[1] + u[1] * along + n[1] * (cx + o)))
+        return [ll[0], ll[1], round(z, 2)]
+    # front face: ring between the inner and outer profiles
+    face = []
+    for (oi, zi), (oo, zo) in zip(inner, outer):
+        face.append(pt(0.0, oi, zi))
+        face.append(pt(0.0, oo, zo))
+    add('m3', {'id': f'{p.id}Pf', 'k': 'frame', 'q': face, 's': p.id}, [[x[0], x[1]] for x in face])
+    # rim: outer profile extruded 1.5 m into the tunnel
+    rim = []
+    for oo, zo in outer:
+        rim.append(pt(0.0, oo, zo))
+        rim.append(pt(1.5, oo, zo))
+    add('m3', {'id': f'{p.id}Pr', 'k': 'frame', 'q': rim, 's': p.id}, [[x[0], x[1]] for x in rim])
 
 
 # ───────────────────────── main ─────────────────────────

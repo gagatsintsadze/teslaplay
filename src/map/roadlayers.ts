@@ -60,7 +60,7 @@ export function addRoadLayers(map: any, theme: 'light' | 'dark') {
     map.addLayer({
       id: `tp-surf${sfx}`, type: 'fill', source: 'tp-surf', minzoom: 15.3, filter: onBridge,
       layout: { 'fill-sort-key': ['get', 'ly'] },
-      paint: { 'fill-color': asphalt, 'fill-opacity': fade(15.3, 16, ['case', ['==', ['get', 'tu'], 1], 0.4, 1]), 'fill-antialias': true, 'fill-outline-color': br ? P.bridgeKerb : P.kerb },
+      paint: { 'fill-color': asphalt, 'fill-opacity': fade(15.3, 16, 1), 'fill-antialias': true, 'fill-outline-color': br ? P.bridgeKerb : P.kerb },
     }, before);
     if (!br) {
       map.addLayer({
@@ -82,7 +82,6 @@ export function addRoadLayers(map: any, theme: 'light' | 'dark') {
     mark('div', hair, { 'line-dasharray': dashM(3, 9, 0.15, 1) });   // 3 m dash, 9 m gap (line 1.5)
     mark('cl1', hair, { 'line-dasharray': dashM(3, 6, 0.15, 1) });   // 3 m dash, 6 m gap: two-way centre line
     mark('guide', hair, { 'line-dasharray': dashM(0.5, 0.5, 0.15, 1), 'line-opacity': fade(16.1, 16.8, 0.7) }); // lane guide lines across junctions (line 1.7)
-    mark('tedge', metres(0.45, 1.5), { 'line-color': P.marking, 'line-dasharray': dashM(2, 2, 0.45, 1.5), 'line-opacity': fade(16.1, 16.8, 0.55) }); // tunnel outline: dashed kerbs
     mark('stop', metres(0.4, 1.5));
     mark('zebra', metres(3.2, 2), { 'line-dasharray': dashM(0.5, 0.5, 3.2, 2), 'line-opacity': fade(16.1, 16.8, 0.85) }); // 0.5 m stripes
   }
@@ -151,10 +150,11 @@ function setStrips(map: any, maplibre: any, theme: 'light' | 'dark', items: any[
   }
   const P = PALETTES[theme];
   const major = new Set(['motorway', 'trunk', 'primary', 'secondary', 'motorway_link', 'trunk_link', 'primary_link', 'secondary_link']);
-  const strips: Strip[] = items.map((f) => ({
-    id: f.id, s: f.s, pts: f.q,
-    color: hex(f.k === 'dmk' ? P.marking : f.k === 'rail' ? P.bridgeKerb : major.has(f.c) ? P.asphalt : P.asphaltMinor),
-  }));
+  const tube: [number, number, number] = theme === 'dark' ? [0.42, 0.5, 0.62] : [0.55, 0.6, 0.68];
+  const frame: [number, number, number] = theme === 'dark' ? [0.36, 0.4, 0.47] : [0.68, 0.65, 0.6];
+  const strips: Strip[] = items.map((f) => f.k === 'tube'
+    ? { id: f.id, s: f.s, pts: f.q, color: tube, alpha: 0.32 }
+    : { id: f.id, s: f.s, pts: f.q, color: f.k === 'frame' ? frame : hex(f.k === 'dmk' ? P.marking : f.k === 'rail' ? P.bridgeKerb : major.has(f.c) ? P.asphalt : P.asphaltMinor) });
   mesh.setStrips(strips);
 }
 
