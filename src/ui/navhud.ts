@@ -1,4 +1,4 @@
-import { laneSvg, type TurnDir } from '../map/arrows';
+import { laneSvg, turnSet, type TurnDir } from '../map/arrows';
 import type { App } from '../app';
 import { h, mount, setText, toggleClass } from '../core/dom';
 import { distanceParts, durationParts, formatClock, formatDistance } from '../core/format';
@@ -25,7 +25,8 @@ export function mountNavHud(app: App, hud: HTMLElement) {
   const thenText = h('span');
   const thenRow = h('div.mv-then', null, h('span', null, 'Then'), thenGlyph, thenText);
   const lanesRow = h('div.mv-lanes.hidden', { 'aria-hidden': 'true' });
-  const banner = h('section.maneuver.glass.glass-lg.glass-dark', { 'aria-live': 'assertive' }, main, lanesRow, thenRow);
+  const lanePrompt = h('div.mv-lane-prompt.hidden', { role: 'status' });
+  const banner = h('section.maneuver.glass.glass-lg.glass-dark', { 'aria-live': 'assertive' }, main, lanesRow, lanePrompt, thenRow);
 
   // ── trip summary ──
   const arrV = h('div.trip-v.arr.num');
@@ -96,15 +97,35 @@ export function mountNavHud(app: App, hud: HTMLElement) {
       void main.offsetWidth;
       main.classList.add('mv-swap');
     }
-    // Lane guidance (Mapbox): which lanes lead the right way at the coming junction.
-    const lanes = m.lanes && m.lanes.length > 1 && n.distToManeuver < 1500 ? m.lanes : null;
-    const laneSig = lanes ? `${n.routeId}:${n.maneuverIndex}` : '';
+    // Lane guidance: from the lane plan (lanes of this road, allowed / recommended / the car's lane),
+    // else Mapbox's lanes for the coming junction.
+    const lg = n.lanes;
+    const mb = m.lanes && m.lanes.length > 1 && n.distToManeuver < 1500 ? m.lanes : null;
+    const show = lg ? lg.turns.length > 1 && (lg.toDeadline !== null || n.distToManeuver < 1500 || lg.current !== null) : !!mb;
+    const laneSig = lg && show ? `p:${n.routeId}:${lg.allowed.join('')}:${lg.recommended}:${lg.current}:${lg.turns.map((t) => t.join('')).join('|')}` : mb ? `m:${n.routeId}:${n.maneuverIndex}` : '';
     if (lanesRow.dataset.sig !== laneSig) {
       lanesRow.dataset.sig = laneSig;
-      toggleClass(lanesRow, 'hidden', !lanes);
-      if (lanes) {
-        mount(lanesRow, ...lanes.map((l) => h('div.mv-lane', { class: { ok: l.valid }, html: laneSvg(l.dirs as TurnDir[], l.valid ? '#ffffff' : 'rgba(255,255,255,.32)') })));
+      toggleClass(lanesRow, 'hidden', !laneSig);
+      if (lg && show) {
+        mount(lanesRow, ...lg.turns.map((t, k) => {
+          const ok = lg.allowed.includes(k);
+          const rec = k === lg.recommended && lg.toDeadline !== null;
+          const color = rec ? '#8fc3ff' : ok ? '#ffffff' : 'rgba(255,255,255,.32)';
+          // an unmarked lane (no arrow painted: parking, bus, or simply unknown) is shown as a plain lane
+          const icon = t.length ? laneSvg(turnSet(t) as TurnDir[], color) : `<svg viewBox="0 0 40 80" width="22" height="44" aria-hidden="true"><path d="M20 14v52" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-dasharray="10 10" fill="none"/></svg>`;
+          return h('div.mv-lane', { class: { ok, rec, here: lg.current === k } }, h('span', { html: icon }), h('i.mv-lane-car'));
+        }));
+      } else if (mb) {
+        mount(lanesRow, ...mb.map((l) => h('div.mv-lane', { class: { ok: l.valid }, html: laneSvg(l.dirs as TurnDir[], l.valid ? '#ffffff' : 'rgba(255,255,255,.32)') })));
       }
+    }
+    const pr = lg && lg.prompt;
+    const prSig = pr ? `${pr.dir}${pr.lanes}${pr.urgent}` : '';
+    if (lanePrompt.dataset.sig !== prSig) {
+      lanePrompt.dataset.sig = prSig;
+      toggleClass(lanePrompt, 'hidden', !pr);
+      toggleClass(lanePrompt, 'urgent', !!pr && pr.urgent);
+      if (pr) setText(lanePrompt, `${pr.dir === 'left' ? '←' : '→'} ${pr.urgent ? 'Wrong lane — ' : ''}Move ${pr.lanes === 1 ? 'one lane' : `${pr.lanes} lanes`} ${pr.dir}`);
     }
     const [dv, du] = distanceParts(n.distToManeuver);
     setText(distV, dv);

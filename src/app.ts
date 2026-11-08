@@ -10,7 +10,7 @@ import type { MapClick, MapEngine, Padding } from './map/engine';
 import { createPuck } from './map/markers';
 import { OsmEngine } from './map/osm';
 import { FollowController, type FollowMode } from './nav/follow';
-import { NavigationSession } from './nav/session';
+import { NavigationSession, type LaneGuide, type NavSnapshot } from './nav/session';
 import { type ChargerService, LiveChargers } from './services/chargers';
 import { DemoChargers, DemoRouting, DemoSearch } from './services/demo';
 import { DEMO_BOUNDS, DEMO_START } from './services/demo-data';
@@ -22,7 +22,7 @@ import { OsmPlaces } from './services/osm';
 import { OsrmRouting } from './services/osrm';
 import { OsmSearch, type SearchService } from './services/search';
 import { RoadDetails } from './services/roads';
-import { laneOfFix, placeOnLanes } from './nav/laneroute';
+import { laneOfFix, placeOnLanes, type LanePlacement } from './nav/laneroute';
 import { trafficOnLanes } from './nav/lanetraffic';
 import { Voice } from './services/voice';
 import { WeatherService } from './services/weather';
@@ -247,6 +247,47 @@ export class App {
     this.follow.setDisplayCoords(g.coords, g.heights.length ? g.heights : null);
   }
 
+  private lanePrompted = new Map<string, number>();
+  /**
+   * Lane guidance for the banner from the lane plan at the car's progress: the lanes of this road,
+   * which lead into the next turn, the recommended one, the lane GPS says the car is in, and — when
+   * the car is not in an allowed lane and the deadline is near — a "move N lanes left/right" prompt,
+   * spoken once, again when half the remaining distance is gone, and as a warning at the junction.
+   */
+  private laneGuide(route: RouteResult, snap: NavSnapshot): LaneGuide | null {
+    if (!this.roads || snap.arrived || snap.offRoute) return null;
+    const g = this.drawGeometry(route);
+    if (!g.plan.length) return null;
+    const d = snap.progress;
+    let i = 0;
+    while (i < route.cum.length - 1 && route.cum[i + 1] < d) i++;
+    const si = g.step[i] >= 0 ? g.step[i] : g.step[i + 1];
+    if (si === undefined || si < 0) return null;
+    const st = g.plan[si];
+    const sec = g.sections[st.section];
+    if (sec.count < 2) return null;
+    const rec = sec.rec;
+    const turns = (sec.forward ? rec.tf : rec.tb) || [];
+    const allowed = st.allowed || Array.from({ length: sec.count }, (_, k) => k);
+    const stable = this.laneSeen.n >= 3;
+    const current = stable ? Math.max(0, Math.min(sec.count - 1, st.recommended + Math.round(this.laneSeen.shift / sec.lw))) : null;
+    const toDeadline = st.allowed ? st.mustBeInBy - d : null;
+    let prompt: LaneGuide['prompt'] = null;
+    if (st.allowed && current !== null && !allowed.includes(current) && toDeadline !== null && toDeadline < 250) {
+      const target = allowed.reduce((b, k) => (Math.abs(k - current) < Math.abs(b - current) ? k : b), allowed[0]);
+      const m = st.maneuver >= 0 ? route.maneuvers[st.maneuver] : null;
+      const toTurn = m ? m.at - d : Infinity;
+      prompt = { dir: target < current ? 'left' : 'right', lanes: Math.abs(target - current), urgent: toTurn < 120 };
+      const key = `${route.id}:${si}`;
+      const said = this.lanePrompted.get(key) || 0;
+      const words = prompt.lanes === 1 ? `Move one lane ${prompt.dir}` : `Move ${prompt.lanes} lanes ${prompt.dir}`;
+      if (said === 0) { this.voice.say(`${words} for the turn.`); this.lanePrompted.set(key, 1); }
+      else if (said === 1 && toDeadline < 0) { this.voice.say(words); this.lanePrompted.set(key, 2); }
+      else if (said === 2 && prompt.urgent) { this.voice.say(`You cannot turn from this lane. ${words} now.`); this.lanePrompted.set(key, 3); }
+    }
+    return { turns: Array.from({ length: sec.count }, (_, k) => (turns[k] || 'none').split(';').filter((t) => t && t !== 'none')), allowed, recommended: st.recommended, current, toDeadline, prompt };
+  }
+
   private xrayIds = '';
   /**
    * Structures the car is about to drive under (car on the ground, a deck within ~70 m ahead over
@@ -295,10 +336,10 @@ export class App {
     if (this.laneSeen.n >= 3 || shift === 0) this.follow.setLaneShift(shift);
   }
 
-  private drawCache = new Map<string, { v: number; coords: LngLat[]; widths: number[]; lanes: number[]; counts: number[]; heights: number[] }>();
+  private drawCache = new Map<string, { v: number } & LanePlacement>();
   /** Route geometry on its lanes (nav/laneroute.ts), plus the lane-band width per vertex (0 = no lane data). */
-  drawGeometry(r: RouteResult): { coords: LngLat[]; widths: number[]; lanes: number[]; counts: number[]; heights: number[] } {
-    if (!this.roads) return { coords: r.coords, widths: [], lanes: [], counts: [], heights: [] };
+  drawGeometry(r: RouteResult): LanePlacement {
+    if (!this.roads) return { coords: r.coords, widths: [], lanes: [], counts: [], heights: [], plan: [], sections: [], step: [] };
     const v = this.state.roadsVersion;
     const hit = this.drawCache.get(r.id);
     if (hit && hit.v === v) return hit;
@@ -697,6 +738,7 @@ export class App {
       onSnapshot: (snap) => {
         // Router knows no limit here: fall back to OpenStreetMap's maxspeed for the road we're on.
         if (snap.speedLimit === null && this.roads && this.state.fix) snap.speedLimit = this.roads.speedLimitAt(this.follow.position || this.state.fix.coord, this.follow.displayHeading);
+        snap.lanes = this.laneGuide(route, snap);
         this.store.set({ nav: snap });
         this.follow.setManeuverDistance(snap.distToManeuver);
       },

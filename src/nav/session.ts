@@ -25,6 +25,22 @@ export interface NavSnapshot {
   nextStop: { name: string; distance: number } | null;
   /** Posted limit where the car is, km/h (router data; the app may fill it from map data). */
   speedLimit: number | null;
+  /** Lane guidance from the lane plan (filled by the app; see nav/laneplan.ts). */
+  lanes?: LaneGuide | null;
+}
+
+export interface LaneGuide {
+  /** lanes in the direction of travel, left → right; each with its painted arrows (OSM keys) */
+  turns: string[][];
+  /** lanes that lead into the next manoeuvre (all of them when unconstrained) */
+  allowed: number[];
+  recommended: number;
+  /** the lane the car is in, from GPS, when stable */
+  current: number | null;
+  /** metres left to get into an allowed lane (negative = past the deadline); null when unconstrained */
+  toDeadline: number | null;
+  /** the lane-change prompt to show, or null */
+  prompt: { dir: 'left' | 'right'; lanes: number; urgent: boolean } | null;
 }
 
 export interface SessionDeps {

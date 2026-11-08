@@ -129,6 +129,8 @@ The lane records carry the height profile (`hz`), so the **route band is drawn o
 
 **The car on the map** (Settings → Navigation): a 3-D model (`public/models/car.glb`, a Sketchfab download of a 2018 Model 3 shrunk from 22 MB to 0.7 MB by `scripts/car/optimize.mjs` — interior removed, meshes simplified, textures 192 px WebP, quantised; check the model's licence on Sketchfab and credit the author if it requires it), or a top-down sedan/SUV sprite, or the classic arrow, in seven paint colours. The model is drawn by `map/car3d.ts` without three.js, scaled to at least 64 px long so it reads at every zoom.
 
+**Lane guidance** (`app.laneGuide`): the banner's lane row is driven by the plan — every lane of the road you're on with its painted arrow, the lanes that lead into the next turn bright, the recommended one in blue, and a green dot under the lane GPS says you're in. When you're not in an allowed lane and the deadline is within 250 m, a chip says "Move one lane left" (spoken once, again once past the deadline, and as "You cannot turn from this lane" in the last 120 m).
+
 While driving, the speed-limit sign uses Mapbox's `maxspeed` along the route, else the OSM `maxspeed` of the road you're on; it pulses red at 5+ km/h over. Mapbox lane data at each maneuver feeds the lane-guidance row under the turn banner. Coverage follows OpenStreetMap: very good in Tbilisi and Batumi, good in Kutaisi, Rustavi and on the E60, sparser in small towns (roads without lane tags are drawn as 1+1 or one lane). To cover neighbouring countries, add Geofabrik regions to `REGIONS` in the workflow (e.g. `asia/armenia asia/azerbaijan`).
 
 ### EV model

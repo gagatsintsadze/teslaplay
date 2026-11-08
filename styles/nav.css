@@ -72,6 +72,13 @@
 .mv-lane svg { width: 1.75rem; height: 3.5rem; }
 .mv-lane.ok { background: rgba(255, 255, 255, .12); }
 .mv-lane + .mv-lane { box-shadow: -.1875rem 0 0 -.125rem rgba(255, 255, 255, .25); }
+.mv-lane { position: relative; flex-direction: column; }
+.mv-lane.rec { background: rgba(72, 143, 255, .28); box-shadow: inset 0 0 0 2px rgba(143, 195, 255, .9); }
+.mv-lane-car { display: none; width: .75rem; height: .75rem; border-radius: 50%; background: #30d158; box-shadow: 0 0 0 3px rgba(48, 209, 88, .3); position: absolute; bottom: .2rem; }
+.mv-lane.here .mv-lane-car { display: block; }
+.mv-lane-prompt { margin: -.25rem 1rem .75rem; padding: .5rem .9rem; border-radius: 1rem; font-weight: 700; font-size: 1.05rem; text-align: center; background: rgba(72, 143, 255, .28); color: #cfe4ff; }
+.mv-lane-prompt.urgent { background: rgba(255, 69, 58, .32); color: #ffd9d6; }
+.mv-lane-prompt.hidden { display: none; }
 
 /* Status pills (rerouting, GPS) */
 .nav-pill { position: absolute; top: calc(var(--edge) + .25rem); left: 0; right: 0; width: max-content; margin: 0 auto; display: flex; align-items: center; gap: .625rem; height: 3rem; padding: 0 1.375rem 0 1.125rem; border-radius: var(--r-pill); font-weight: 700; transform-origin: top center; animation: lg-in .56s var(--spring-soft) both; }
