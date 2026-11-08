@@ -7,10 +7,11 @@ import type { LngLat, Maneuver } from '../types';
  * here every vertex is matched to a lane record from the pre-built lane model and moved to the
  * centre of the lanes the car should be in, with the band's width alongside:
  *
- *  - by default the band covers every lane of the direction of travel (one-way: the whole
- *    carriageway; two-way: the forward or backward lanes, whichever the route runs along)
- *  - approaching a turn it narrows to the lanes that lead there: Mapbox's lane flags when it
- *    sent them, else OSM `turn:lanes`
+ *  - the band is always one lane wide. By default it is the right-hand lane of the direction of
+ *    travel (keep right; on a dual carriageway each direction is its own road with its own lanes)
+ *  - approaching a turn it moves to the lane that leads there: Mapbox's lane flags when it sent
+ *    them (the active lane, else the valid ones), else OSM `turn:lanes`, else the lane on the
+ *    turning side; among several usable lanes the one nearest the default is kept
  *  - lane changes are blended in over the vertices before the turn
  *  - where no lane record is within reach (no data) the vertex stays where the router put it
  *
@@ -38,27 +39,25 @@ function laneCentres(r: LaneRecord, forward: boolean): number[] {
 
 const turnsOf = (r: LaneRecord, forward: boolean) => (forward ? r.tf : r.tb);
 
-/** Which lanes lead into this manoeuvre (indices in the travel frame), or null for "any". */
-function lanesFor(m: Maneuver, rec: LaneRecord, forward: boolean): [number, number] | null {
+/** The lane (index in the travel frame, leftmost = 0) to be in for this manoeuvre; null = the default lane. */
+function laneFor(m: Maneuver, rec: LaneRecord, forward: boolean): number | null {
   const n = forward ? rec.f : rec.b;
   if (n <= 1) return null;
+  const left = /left/.test(m.type) || m.type === 'uturn';
+  const right = /right/.test(m.type);
+  const pick = (idx: number[]) => (left ? Math.min(...idx) : right ? Math.max(...idx) : Math.max(...idx)); // straight on: stay as far right as allowed
   if (m.lanes && m.lanes.length === n) {
+    const active = m.lanes.map((l, i) => (l.active ? i : -1)).filter((i) => i >= 0);
+    if (active.length) return pick(active);
     const valid = m.lanes.map((l, i) => (l.valid ? i : -1)).filter((i) => i >= 0);
-    if (valid.length && valid.length < n) return [Math.min(...valid), Math.max(...valid)];
+    if (valid.length) return pick(valid);
     return null;
   }
   const turns = turnsOf(rec, forward);
-  if (!turns) {
-    // No arrows painted: a turn is made from the lane on that side.
-    if (/left/.test(m.type) || m.type === 'uturn') return [0, 0];
-    if (/right/.test(m.type)) return [n - 1, n - 1];
-    return null;
-  }
-  const want: RegExp | null = /left/.test(m.type) || m.type === 'uturn' ? /left|reverse/ : /right/.test(m.type) ? /right/ : m.type === 'straight' || m.type === 'depart' || m.type === 'arrive' ? null : null;
-  if (!want) return null;
+  if (!turns) return left ? 0 : right ? n - 1 : null;
+  const want = left ? /left|reverse/ : right ? /right/ : /through|none/;
   const idx = turns.map((t, i) => (want.test(t) ? i : -1)).filter((i) => i >= 0);
-  if (!idx.length || idx.length === n) return null;
-  return [Math.min(...idx), Math.max(...idx)];
+  return idx.length ? pick(idx) : null;
 }
 
 function nearest(p: LngLat, heading: number, recs: LaneRecord[]): Match | null {
@@ -97,7 +96,7 @@ export function placeOnLanes(coords: LngLat[], cum: number[], maneuvers: Maneuve
   const widths = new Array<number>(n).fill(0);
   const offs = new Array<number>(n).fill(0);
   const matches: (Match | null)[] = new Array(n).fill(null);
-  const target: ([number, number] | null)[] = new Array(n).fill(null);
+  const target: (number | null)[] = new Array(n).fill(null);
   // Which manoeuvre each vertex is approaching (for its lane choice).
   let mi = 0;
   for (let i = 0; i < n; i++) {
@@ -107,7 +106,7 @@ export function placeOnLanes(coords: LngLat[], cum: number[], maneuvers: Maneuve
     matches[i] = m;
     while (mi < maneuvers.length && maneuvers[mi].at < cum[i] - 1) mi++;
     const mv = maneuvers[mi];
-    if (m && mv && mv.at - cum[i] <= LEAD_M && mv.at - cum[i] >= -1) target[i] = lanesFor(mv, m.rec, m.forward);
+    if (m && mv && mv.at - cum[i] <= LEAD_M && mv.at - cum[i] >= -1) target[i] = laneFor(mv, m.rec, m.forward);
   }
   // Lane choice → offset of the band centre and its width, per vertex.
   for (let i = 0; i < n; i++) {
@@ -116,11 +115,9 @@ export function placeOnLanes(coords: LngLat[], cum: number[], maneuvers: Maneuve
     const centres = laneCentres(m.rec, m.forward);
     if (!centres.length) { matches[i] = null; continue; }
     const t = target[i];
-    const lo = t ? Math.max(0, t[0]) : 0;
-    const hi = t ? Math.min(centres.length - 1, t[1]) : centres.length - 1;
-    const centre = (centres[lo] + centres[hi]) / 2;
-    offs[i] = centre - m.signed;
-    widths[i] = (hi - lo + 1) * m.rec.lw;
+    const k = t === null ? centres.length - 1 : Math.max(0, Math.min(centres.length - 1, t)); // default: the right-hand lane
+    offs[i] = centres[k] - m.signed;
+    widths[i] = m.rec.lw;
   }
   // Blend lane changes: vertices within BLEND_M before a change ease towards the new lanes.
   const rawO = offs.slice(), rawW = widths.slice();
@@ -149,6 +146,12 @@ export function placeOnLanes(coords: LngLat[], cum: number[], maneuvers: Maneuve
     const b1 = i > 0 ? bearing(prv, coords[i]) : bearing(coords[i], nxt);
     const b2 = i < n - 1 ? bearing(coords[i], nxt) : b1;
     const turn = ((b2 - b1 + 540) % 360) - 180;
+    if (Math.abs(turn) > 35) {
+      // A corner (a turn at a junction): keep the lane of the road being left and let the band cut
+      // across the junction to the next lane, as a car does, instead of mitring far off the road.
+      out[i] = destination(coords[i], normalize360(b1 + 90), o);
+      continue;
+    }
     const miter = Math.min(2.5, 1 / Math.max(0.2, Math.cos(toRad(turn / 2))));
     out[i] = destination(coords[i], normalize360(b1 + turn / 2 + 90), o * miter);
   }

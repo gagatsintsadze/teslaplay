@@ -89,7 +89,7 @@ function toRoute(rt: any, req: RouteRequest): RouteResult {
       for (const x of xs) if (x.traffic_signal && Array.isArray(x.location)) signals.push(x.location as LngLat);
       // Lanes at the junction where this step's maneuver happens, as Mapbox reports them.
       const rawLanes: any[] = (xs[0] && xs[0].lanes) || [];
-      const lanes = rawLanes.length > 1 ? rawLanes.map((l: any) => ({ dirs: turnSet(l.indications || []), valid: !!l.valid })) : undefined;
+      const lanes = rawLanes.length > 1 ? rawLanes.map((l: any) => ({ dirs: turnSet(l.indications || []), valid: !!l.valid, active: !!l.active })) : undefined;
       const m = s.maneuver || {};
       if (SILENT.has(m.type)) continue;
       const type = MODIFIER[m.modifier];

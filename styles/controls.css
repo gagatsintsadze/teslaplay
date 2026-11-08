@@ -85,6 +85,14 @@
 .puck.has-heading .puck-cone { opacity: 1; }
 .puck-arrow { position: absolute; left: 0; top: 0; width: 3.5rem; height: 3.5rem; margin: -1.75rem 0 0 -1.75rem; display: none; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .45)); }
 .puck.nav .puck-arrow { display: block; }
+.puck-car { position: absolute; left: 0; top: 0; width: 2.75rem; height: 5.5rem; margin: -2.75rem 0 0 -1.375rem; display: none; filter: drop-shadow(0 8px 10px rgba(0, 0, 0, .5)); }
+.puck-car svg { width: 100%; height: 100%; display: block; }
+.puck.car .puck-car { display: block; }
+.puck.car .puck-core, .puck.car .puck-cone, .puck.car .puck-arrow { display: none; }
+.puck.car .puck-halo { animation: none; opacity: 0; }
+.car-swatches { display: flex; gap: .5rem; }
+.car-swatch { width: 2.2rem; height: 2.2rem; border-radius: 50%; border: 3px solid transparent; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .25); cursor: pointer; }
+.car-swatch.on { border-color: var(--blue); }
 .puck.nav .puck-core, .puck.nav .puck-cone { display: none; }
 .puck.nav .puck-halo { animation: none; opacity: 0; }
 .puck.stale .puck-core { background: var(--gray); }

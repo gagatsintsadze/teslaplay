@@ -56,7 +56,7 @@ export interface Maneuver {
   /** Router-written instruction (Mapbox), e.g. "Take the 2nd exit onto …". */
   instruction?: string;
   /** Lanes approaching this maneuver, left to right: arrows painted on each, and whether it leads the right way. */
-  lanes?: { dirs: string[]; valid: boolean }[];
+  lanes?: { dirs: string[]; valid: boolean; active?: boolean }[];
 }
 
 /** A stretch of the route with moderate (2), heavy (3) or severe (4) congestion, by distance along it. */
@@ -157,5 +157,8 @@ export interface Settings {
   textSize: 'standard' | 'large' | 'larger';
   traffic: boolean;
   view3D: boolean;
+  /** Marker shown while driving: an arrow or a car, and the car's colour. */
+  carMarker: 'arrow' | 'sedan' | 'suv';
+  carColor: string;
   devTools: boolean;
 }
