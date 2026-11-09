@@ -1,0 +1,13 @@
+{
+ "v": 3,
+ "z": 14,
+ "built": "2026-11-09T09:57:19Z",
+ "tiles": 10413,
+ "ways": 131773,
+ "signals": 646,
+ "sources": [
+  "georgia.osm.pbf"
+ ],
+ "license": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0 (https://www.openstreetmap.org/copyright)",
+ "parts": 249625
+}
